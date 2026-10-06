@@ -35,10 +35,14 @@ button, a { font: inherit; color: inherit; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
 .stage canvas:active { cursor: grabbing; }
 .tags { position: absolute; inset: 0; pointer-events: none; }
-.tag { position: absolute; left: 0; top: 0; pointer-events: auto; min-height: 44px; padding: 5px 11px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: var(--plate); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; white-space: nowrap; will-change: transform; }
+.tag { position: absolute; left: 0; top: 0; pointer-events: auto; min-height: 40px; padding: 5px 11px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; background: var(--plate); border: 1px solid var(--line); border-radius: 2px; cursor: pointer; white-space: nowrap; will-change: transform; }
 .tag b { font-family: var(--display); font-weight: 400; font-size: 17px; line-height: 1.1; }
 .tag span { font-family: var(--data); font-size: 11px; color: var(--dim); }
 .tag i { font-style: normal; font-family: var(--data); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--brass); }
+.tag span, .tag i { display: none; }
+.tag:hover span, .tag:hover i, .tag:focus-visible span, .tag:focus-visible i, .tag[aria-pressed="true"] span, .tag[aria-pressed="true"] i { display: block; }
+.tag { transition: opacity 0.15s; }
+.tag.hid { opacity: 0; pointer-events: none; }
 .tag:hover { border-color: var(--dim); }
 .tag[aria-pressed="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .mark { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; font-family: var(--data); font-size: 11px; letter-spacing: 0.26em; text-transform: uppercase; }

@@ -1,7 +1,7 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
-import { ERIS_LIQUIDITY_HUB } from './config.js';
+import { ERIS_LIQUIDITY_HUB, PEGS, AMPLUNA_TOKEN } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS } from './realm.js';
-import { loadLive, lunaUsd } from './chain.js';
+import { loadLive, lunaUsd, ampLunaRate } from './chain.js';
 import { buildSystems, layout, nextCycle, formatCountdown, formatAmount, formatMass } from './model.js';
 import { createChart } from './scene.js';
 
@@ -46,10 +46,9 @@ function select(id) {
   }
   pair.appendChild(document.createTextNode('pool'));
 
-  $('v-mass').textContent = s.live ? formatMass(s.value, s.unit) : 'Sample size';
-  $('v-mass-note').textContent = s.live
-    ? `${s.amounts.map((a) => `${formatAmount(a.amount)} ${a.symbol}`).join(' + ')}, live from Astroport`
-    : 'Value held in the pool';
+  const reserves = s.amounts ? s.amounts.map((x) => `${formatAmount(x.amount)} ${x.symbol}`).join(' + ') : '';
+  $('v-mass').textContent = s.live ? formatMass(s.value, s.unit) : s.amounts ? 'Not priced' : 'Sample size';
+  $('v-mass-note').textContent = s.amounts ? `${reserves}, live from Astroport` : 'Value held in the pool';
   for (const key of ['v-yield', 'v-fleet', 'v-tribute']) $(key).textContent = NEEDS_ERIS;
 
   for (const [key, el] of Object.entries(listEls)) el.setAttribute('aria-pressed', key === s.id ? 'true' : 'false');
@@ -93,8 +92,12 @@ tick();
 setInterval(tick, 60000);
 
 (async () => {
-  const [{ live, errors }, price] = await Promise.all([loadLive(POOLS), lunaUsd()]);
+  const [{ live, errors }, price, rate] = await Promise.all([loadLive(POOLS), lunaUsd(), ampLunaRate()]);
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
-  if (Object.keys(live).length) render(buildSystems(POOLS, live, { lunaUsd: price }));
-  else if (errors.length) $('r-data').textContent = 'Sample data (chain unreachable)';
+  if (Object.keys(live).length) {
+    const known = rate ? { [AMPLUNA_TOKEN]: rate } : {};
+    render(buildSystems(POOLS, live, { lunaUsd: price, pegs: PEGS, known }));
+  } else if (errors.length) {
+    $('r-data').textContent = 'Sample data (chain unreachable)';
+  }
 })();

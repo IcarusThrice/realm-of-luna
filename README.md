@@ -8,12 +8,14 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 
 | Part | State |
 |---|---|
-| Pool pairs | Real, from Phoenix and Eris public posts |
-| Reserves and mass | Read live from Astroport for any pool with a `pair` address in `src/realm.js`. One pool (LUNA-ampLUNA) has its address so far |
-| System names, sector placement, crown marks | Placeholders |
+| Pools shown | The deepest Astroport pools on Terra, found with the pair finder at `/discover` |
+| Reserves and mass | Read live from Astroport on every load |
+| Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA uses the Eris hub's exchange rate. Dollar figures use CoinGecko's LUNA price |
+| Crown systems | The two pools holding protocol-owned liquidity from Terra proposal 4844 |
+| System names, sector placement | Placeholders |
 | Yield, fleet (vote share), tribute (voter incentives) | Not wired yet. These live in the Eris Liquidity Alliance contracts |
 
-Live reading has not been tested against mainnet yet. If no endpoint answers, the chart shows sample sizes and says so in the header.
+If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 
 ## Run it
 
@@ -29,14 +31,9 @@ Then open http://localhost:8080.
 
 Any static host works. On Cloudflare Pages: connect this repo, leave the build command empty, and set the output directory to `/`.
 
-## Add live pools
+## Add pools
 
-```
-npm run discover              # every Astroport pair with reserves
-npm run discover -- LUNA USDC # only pairs holding both symbols
-```
-
-Copy a pair address into the matching entry in `src/realm.js`. The site reads its reserves on the next load.
+Open `/discover` on the deployed site (or run `npm run discover`). It lists every Astroport pair with its reserves, deepest first. Add an entry to `POOLS` in `src/realm.js` with the pair address and pool type.
 
 ## Layout
 

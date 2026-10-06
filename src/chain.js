@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, NATIVE_DENOMS, BASE_DENOMS, LUNA_PRICE_URL } from './config.js';
+import { LCD_ENDPOINTS, NATIVE_DENOMS, BASE_DENOMS, LUNA_PRICE_URL, ERIS_HUB } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -94,6 +94,16 @@ export async function loadLive(pools) {
     }
   }));
   return { live, errors };
+}
+
+// Exact LUNA value of one ampLUNA, from the Eris hub. Null if it cannot be read.
+export async function ampLunaRate() {
+  try {
+    const rate = Number((await smart(ERIS_HUB, { state: {} })).exchange_rate);
+    return rate > 0 ? rate : null;
+  } catch (err) {
+    return null;
+  }
 }
 
 export async function lunaUsd() {

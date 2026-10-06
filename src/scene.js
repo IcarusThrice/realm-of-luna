@@ -206,6 +206,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       tag.setAttribute('aria-pressed', s.id === selected ? 'true' : 'false');
       tags.appendChild(tag);
       tagEls[s.id] = tag;
+      s.box = null;
       s.anchor = pos.clone().setY(pos.y - extent - 0.3);
     });
   }
@@ -213,6 +214,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   function setSelected(id) {
     selected = id;
     for (const [key, el] of Object.entries(tagEls)) el.setAttribute('aria-pressed', key === id ? 'true' : 'false');
+    for (const s of systems) s.box = null; // the selected label is larger, so measure again
   }
 
   // Camera: drag to turn, wheel or pinch to zoom.
@@ -277,11 +279,25 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     const cur = systems.find((s) => s.id === selected);
     selRing.visible = !!cur;
     if (cur) selRing.position.copy(cur.base).setY(0.02);
+    // Labels: nearest first. A label that would cover one already placed steps aside
+    // (it fades out; the system stays reachable from the list and by turning the chart).
+    const spots = [];
     for (const s of systems) {
       const el = tagEls[s.id];
       if (!el) continue;
-      const z = place(el, s.anchor, 4, false);
-      el.style.zIndex = String(2000 - Math.round(z * 1000));
+      if (!s.box) s.box = { w: el.offsetWidth, h: el.offsetHeight };
+      v3.copy(s.anchor).project(camera);
+      spots.push({ s, el, x: (v3.x * 0.5 + 0.5) * W, y: (-v3.y * 0.5 + 0.5) * H + 4, z: v3.z });
+    }
+    spots.sort((p, q) => (q.s.id === selected) - (p.s.id === selected) || p.z - q.z);
+    const taken = [];
+    for (const p of spots) {
+      const box = { l: p.x - p.s.box.w / 2 - 4, r: p.x + p.s.box.w / 2 + 4, t: p.y - 4, b: p.y + p.s.box.h + 4 };
+      const clash = taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t);
+      p.el.classList.toggle('hid', clash);
+      if (!clash) taken.push(box);
+      p.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) translate(-50%,0)`;
+      p.el.style.zIndex = String(2000 - Math.round(p.z * 1000));
     }
     for (const m of marks) place(m.el, m.v, -4, true);
     renderer.render(scene, camera);

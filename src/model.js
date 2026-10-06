@@ -1,33 +1,68 @@
 // Pure functions: chain numbers in, chart-ready systems out. No DOM, no network.
 
-// Price every token seen in the live pools, in one unit.
-// Unit is USD when a USDC pool is present, otherwise LUNA.
-export function priceTokens(live) {
-  const pools = Object.values(live).filter((assets) => assets && assets.length === 2);
-  const hasUsdc = pools.some((assets) => assets.some((a) => a.symbol === 'USDC'));
-  const unit = hasUsdc ? 'USD' : 'LUNA';
-  const prices = { [hasUsdc ? 'USDC' : 'LUNA']: 1 };
-  for (let pass = 0; pass < pools.length + 1; pass++) {
-    let changed = false;
-    for (const [x, y] of pools) {
-      if (!(x.amount > 0 && y.amount > 0)) continue;
-      const px = prices[x.symbol], py = prices[y.symbol];
-      if (px != null && py == null) { prices[y.symbol] = px * x.amount / y.amount; changed = true; }
-      if (py != null && px == null) { prices[x.symbol] = py * y.amount / x.amount; changed = true; }
-    }
-    if (!changed) break;
-  }
-  return { unit, prices };
-}
-
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// Price every token in LUNA, by token key (denom or contract address), never by symbol:
+// anyone can mint a token and call it "LUNA" or "USDC".
+//
+// pools: [{ assets: [{ key, amount }, { key, amount }], type }]
+// Prices spread outward from native LUNA. Constant-product (xyk) pools go first because
+// their reserve ratio is the price; other pool types are only an approximation. Within a
+// type the deepest pool goes first, so a thin skewed pool cannot set a price a deep pool
+// also knows. `known` seeds exact prices (ampLUNA from the Eris hub). `pegs` are groups
+// of keys valued alike (dollar stablecoins).
+export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {} } = {}) {
+  const prices = { ...known, [anchor]: 1 };
+  const setPrice = (key, price) => {
+    prices[key] = price;
+    for (const group of pegs) {
+      if (group.includes(key)) for (const k of group) if (!(k in prices)) prices[k] = price;
+    }
+  };
+  for (const key of Object.keys(known)) setPrice(key, known[key]);
+  const usable = (p) => p && p.assets && p.assets.length === 2 && p.assets.every((a) => a.amount > 0);
+  const todo = new Set(pools.filter(usable));
+  for (;;) {
+    let best = null, bestVal = 0, bestRank = 9;
+    for (const p of todo) {
+      const priced = p.assets.filter((a) => a.key in prices);
+      if (priced.length === 2) { todo.delete(p); continue; }
+      if (priced.length !== 1) continue;
+      const rank = p.type === 'xyk' ? 0 : 1;
+      const val = priced[0].amount * prices[priced[0].key];
+      if (rank < bestRank || (rank === bestRank && val > bestVal)) { best = p; bestVal = val; bestRank = rank; }
+    }
+    if (!best) break;
+    const unknown = best.assets.find((a) => !(a.key in prices));
+    setPrice(unknown.key, bestVal / unknown.amount);
+    todo.delete(best);
+  }
+  return prices;
+}
+
+// Value of one pool in LUNA. With one side unpriced, assume the pool is balanced.
+export function poolDepth(assets, prices) {
+  const vals = (assets || []).map((a) => (a.key in prices ? a.amount * prices[a.key] : null));
+  const known = vals.filter((v) => v != null);
+  return { vals, depth: known.length === 2 ? known[0] + known[1] : known.length === 1 ? 2 * known[0] : 0 };
+}
+
+// Rank many pools by depth in LUNA, deepest first.
+export function rankByDepth(pools, opts) {
+  const prices = priceByKey(pools, opts);
+  const ranked = pools.map((p) => ({ ...p, depth: poolDepth(p.assets, prices).depth }));
+  return { prices, ranked: ranked.sort((x, y) => y.depth - x.depth) };
+}
+
 // Merge the curated pools with live reserves.
-// opts.lunaUsd converts LUNA-denominated mass to dollars when known.
+// opts.lunaUsd converts mass to dollars when known; opts.pegs and opts.known go to pricing.
 export function buildSystems(pools, live = {}, opts = {}) {
-  let { unit, prices } = priceTokens(live);
-  let scale = 1;
-  if (unit === 'LUNA' && opts.lunaUsd > 0) { scale = opts.lunaUsd; unit = 'USD'; }
+  const prices = priceByKey(
+    pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
+    { pegs: opts.pegs || [], known: opts.known || {} },
+  );
+  const usd = opts.lunaUsd > 0;
+  const unit = usd ? 'USD' : 'LUNA';
 
   const systems = pools.map((p) => {
     const assets = live[p.id];
@@ -35,28 +70,26 @@ export function buildSystems(pools, live = {}, opts = {}) {
     if (!assets || assets.length !== 2) return s;
     // Match chain assets to the curated a/b order by symbol, else keep chain order.
     const first = assets.find((x) => x.symbol === p.a) || assets[0];
-    const second = assets.find((x) => x !== first && x.symbol === p.b) || assets.find((x) => x !== first);
-    const va = prices[first.symbol] != null ? first.amount * prices[first.symbol] : null;
-    const vb = prices[second.symbol] != null ? second.amount * prices[second.symbol] : null;
-    s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
+    const second = assets.find((x) => x !== first);
     s.a = first.symbol; s.b = second.symbol;
-    if (va == null && vb == null) return s;
-    const total = va != null && vb != null ? va + vb : 2 * (va != null ? va : vb);
-    if (!(total > 0)) return s;
+    s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
+    const { vals, depth } = poolDepth([first, second], prices);
+    if (!(depth > 0)) return s;
     s.live = true;
-    s.value = total * scale;
-    s.shareA = va != null && vb != null ? clamp(va / total, 0.2, 0.8) : 0.5;
+    s.value = depth * (usd ? opts.lunaUsd : 1);
+    s.shareA = vals[0] != null && vals[1] != null ? clamp(vals[0] / depth, 0.2, 0.8) : 0.5;
     return s;
   });
 
   // Size by live mass once enough pools are live to compare; until then use sample sizes.
-  const liveVals = systems.filter((s) => s.live).map((s) => Math.log10(s.value));
+  // A power curve keeps a $20K pool visibly smaller than a $1M pool without vanishing.
+  const liveVals = systems.filter((s) => s.live).map((s) => s.value);
   const useLive = liveVals.length >= 3;
-  const lo = Math.min(...liveVals), hi = Math.max(...liveVals);
+  const top = Math.max(...liveVals);
   for (const s of systems) {
-    if (useLive) s.size = s.live ? 0.54 + 0.46 * (hi > lo ? (Math.log10(s.value) - lo) / (hi - lo) : 0.5) : 0.54;
-    else s.size = clamp(s.sampleSize || 0.54, 0.54, 1);
-    s.tier = s.size >= 0.87 ? 'Stronghold' : s.size >= 0.64 ? 'Colony' : 'Outpost';
+    if (useLive) s.size = s.live ? 0.42 + 0.58 * Math.pow(s.value / top, 0.3) : 0.42;
+    else s.size = clamp(s.sampleSize || 0.54, 0.42, 1);
+    s.tier = s.size >= 0.87 ? 'Stronghold' : s.size >= 0.6 ? 'Colony' : 'Outpost';
   }
   return systems;
 }
@@ -68,6 +101,8 @@ function hash(str) {
 }
 
 // Place each system inside its sector's 120 degree wedge: polar radius, angle, height.
+// Neighbours alternate between three rings so their labels have room.
+const RINGS = [7, 11.2, 9.1];
 export function layout(systems, sectors) {
   const bySector = {};
   for (const s of systems) (bySector[s.sector] = bySector[s.sector] || []).push(s);
@@ -76,7 +111,7 @@ export function layout(systems, sectors) {
     const from = sectors[key] ? sectors[key].from : 0;
     list.forEach((s, i) => {
       s.deg = from + 120 * (i + 0.5) / list.length;
-      s.r = i % 2 === 0 ? 7 : 10.6;
+      s.r = RINGS[i % RINGS.length];
       s.y = 1.5 + (hash(s.id) % 20) / 10;
     });
   }
@@ -110,34 +145,4 @@ export function formatAmount(v) {
 export function formatMass(value, unit) {
   if (value == null) return '';
   return unit === 'USD' ? '$' + formatAmount(value) : formatAmount(value) + ' ' + unit;
-}
-
-// Rank many pools by depth in one anchor token (default LUNA).
-// Prices spread outward from the anchor through the deepest pool first, so a thin
-// pool with a skewed ratio cannot set the price of a token a deep pool also holds.
-export function rankByDepth(pools, anchor = 'LUNA') {
-  const prices = { [anchor]: 1 };
-  const side = (p, known) => p.assets.find((a) => (a.symbol in prices) === known);
-  const todo = new Set(pools.filter((p) => p.assets && p.assets.length === 2 && p.assets.every((a) => a.amount > 0)));
-  for (;;) {
-    let best = null, bestVal = 0;
-    for (const p of todo) {
-      const priced = p.assets.filter((a) => a.symbol in prices);
-      if (priced.length === 2) { todo.delete(p); continue; }
-      if (priced.length !== 1) continue;
-      const val = priced[0].amount * prices[priced[0].symbol];
-      if (val > bestVal) { best = p; bestVal = val; }
-    }
-    if (!best) break;
-    const known = side(best, true), unknown = side(best, false);
-    prices[unknown.symbol] = bestVal / unknown.amount;
-    todo.delete(best);
-  }
-  const ranked = pools.map((p) => {
-    const vals = (p.assets || []).map((a) => (a.symbol in prices ? a.amount * prices[a.symbol] : null));
-    const known = vals.filter((v) => v != null);
-    const depth = known.length === 2 ? known[0] + known[1] : known.length === 1 ? 2 * known[0] : 0;
-    return { ...p, depth };
-  });
-  return { prices, ranked: ranked.sort((x, y) => y.depth - x.depth) };
 }

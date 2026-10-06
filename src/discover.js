@@ -1,5 +1,5 @@
 // Lists every Astroport pair with its reserves, deepest first. Read-only.
-import { ASTROPORT_FACTORY } from './config.js';
+import { ASTROPORT_FACTORY, PEGS } from './config.js';
 import { listFactoryPairs, loadPool } from './chain.js';
 import { rankByDepth, formatAmount } from './model.js';
 
@@ -38,11 +38,12 @@ async function run() {
   done -= failed.length;
   for (const p of failed) await read(p, stillFailed);
 
-  const { ranked } = rankByDepth(rows);
-  const shown = ranked.filter((r) => r.depth > 0);
+  // Depth is measured from native LUNA, so look-alike tokens cannot inflate it.
+  const { ranked } = rankByDepth(rows, { pegs: PEGS });
+  const shown = ranked.filter((r) => r.depth >= 500);
   const body = $('rows');
   body.textContent = '';
-  for (const r of shown.slice(0, 120)) {
+  for (const r of shown.slice(0, 200)) {
     const tr = document.createElement('tr');
     const cells = [
       r.assets.map((a) => a.symbol).join(' · '),
@@ -59,14 +60,14 @@ async function run() {
     });
     body.appendChild(tr);
   }
-  $('out').value = JSON.stringify(shown.slice(0, 120).map((r) => ({
+  $('out').value = JSON.stringify(shown.slice(0, 200).map((r) => ({
     pair: r.pair,
     type: r.type,
     depthLuna: Math.round(r.depth),
     assets: r.assets.map((a) => ({ symbol: a.symbol, key: a.key, amount: Number(a.amount.toPrecision(8)) })),
   })));
   $('results').hidden = false;
-  status(`${pairs.length} pairs listed, ${shown.length} hold liquidity, ${stillFailed.length} could not be read. Showing the deepest ${Math.min(120, shown.length)}.`);
+  status(`${pairs.length} pairs listed, ${shown.length} hold at least 500 LUNA of depth, ${stillFailed.length} could not be read.`);
   $('go').disabled = false;
 }
 
