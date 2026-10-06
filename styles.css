@@ -78,6 +78,7 @@ button, a { font: inherit; color: inherit; }
 .acts a.alt span { color: var(--dim); }
 .acts a:hover { filter: brightness(1.12); }
 .note { margin: 0; font-size: 13px; color: var(--dim); }
+.note a { color: var(--brass); }
 .panel h3 { margin: 0 0 10px; font-family: var(--display); font-weight: 400; font-size: 21px; color: var(--brass); }
 .key { margin: 0; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px 14px; font-size: 14px; }
 .key dt { font-weight: 700; }
