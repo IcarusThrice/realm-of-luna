@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -167,28 +167,64 @@ export async function listFactoryPairs(factory, max = 2000) {
   return out;
 }
 
+// --- Smart queries over RPC -------------------------------------------------------------
+// The request and response are tiny protobuf messages, encoded by hand:
+//   QuerySmartContractStateRequest  { 1: address (string), 2: query_data (bytes) }
+//   QuerySmartContractStateResponse { 1: data (bytes) }
+const varint = (n) => {
+  const out = [];
+  while (n > 127) { out.push((n & 127) | 128); n = Math.floor(n / 128); }
+  out.push(n);
+  return out;
+};
+export function encodeSmartQuery(address, msg) {
+  const enc = new TextEncoder();
+  const a = enc.encode(address), q = enc.encode(JSON.stringify(msg));
+  const bytes = [0x0a, ...varint(a.length), ...a, 0x12, ...varint(q.length), ...q];
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+export function decodeSmartResponse(base64) {
+  const raw = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+  if (raw[0] !== 0x0a) throw new Error('Unexpected response encoding');
+  let len = 0, shift = 1, i = 1;
+  for (;;) { const b = raw[i++]; len += (b & 127) * shift; if (b < 128) break; shift *= 128; }
+  return JSON.parse(new TextDecoder().decode(raw.slice(i, i + len)));
+}
+
+// Returns { data } on success or { error } carrying the contract's own rejection text.
+export async function rpcSmart(address, msg) {
+  const query = `/abci_query?path=%22/cosmwasm.wasm.v1.Query/SmartContractState%22&data=0x${encodeSmartQuery(address, msg)}`;
+  let lastErr = 'No RPC endpoint configured';
+  for (const base of RPC_ENDPOINTS) {
+    try {
+      const json = await getJson(base + query, 10000);
+      const res = json.result && json.result.response;
+      if (!res) { lastErr = `${new URL(base).host}: ${JSON.stringify(json.error || json).slice(0, 300)}`; continue; }
+      if (res.code) return { error: res.log || `code ${res.code}` };
+      return { data: decodeSmartResponse(res.value) };
+    } catch (err) {
+      lastErr = `${new URL(base).host}: ${err.message}`;
+    }
+  }
+  return { error: lastErr, unreachable: true };
+}
+
 // Ask a contract which queries it accepts. CosmWasm answers an unknown query with the
 // list of valid ones, so one deliberately wrong question maps the whole interface.
 // Then try each query with no arguments and keep whatever comes back.
 export async function probeContract(address) {
   const out = { address, queries: [], results: {} };
-  let message = '';
-  try {
-    out.results.__unexpected = await smart(address, { realm_of_luna_probe: {} });
-  } catch (err) {
-    message = err.detail || err.message;
-  }
+  const first = await rpcSmart(address, { realm_of_luna_probe: {} });
+  const message = first.error || '';
+  if (first.data !== undefined) out.results.__unexpected = first.data;
   out.rejection = message.slice(0, 1500);
   const listed = message.split('expected one of')[1] || '';
   out.queries = Array.from(new Set((listed.match(/`([A-Za-z0-9_]+)`/g) || []).map((s) => s.slice(1, -1))));
   for (const name of out.queries) {
-    try {
-      const data = await smart(address, { [name]: {} });
-      const text = JSON.stringify(data);
-      out.results[name] = text.length > 6000 ? { truncated: text.slice(0, 6000) } : data;
-    } catch (err) {
-      out.results[name] = { error: (err.detail || err.message).slice(0, 600) };
-    }
+    const res = await rpcSmart(address, { [name]: {} });
+    if (res.error) { out.results[name] = { error: res.error.slice(0, 600) }; continue; }
+    const text = JSON.stringify(res.data);
+    out.results[name] = text.length > 6000 ? { truncated: text.slice(0, 6000) } : res.data;
   }
   return out;
 }

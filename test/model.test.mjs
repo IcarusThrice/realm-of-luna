@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { priceByKey, rankByDepth, buildSystems, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
-import { smartPath } from '../src/chain.js';
+import { smartPath, encodeSmartQuery, decodeSmartResponse } from '../src/chain.js';
 import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
 import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
 
@@ -144,4 +144,14 @@ test('formatting', () => {
 test('smart query path is base64 JSON', () => {
   const path = smartPath('terra1abc', { pool: {} });
   assert.equal(path, '/cosmwasm/wasm/v1/contract/terra1abc/smart/' + encodeURIComponent(btoa('{"pool":{}}')));
+});
+
+test('RPC smart queries are encoded and decoded as protobuf', () => {
+  // field 1 (address, 3 bytes), field 2 (query bytes)
+  assert.equal(encodeSmartQuery('abc', { a: {} }), '0a03616263' + '12' + '08' + Buffer.from('{"a":{}}').toString('hex'));
+  const long = 'x'.repeat(200);
+  assert.ok(encodeSmartQuery(long, {}).startsWith('0ac801'), 'two-byte length for 200');
+  const body = Buffer.from(JSON.stringify({ pools: 'y'.repeat(300) }));
+  const framed = Buffer.concat([Buffer.from([0x0a, (body.length & 127) | 128, body.length >> 7]), body]);
+  assert.deepEqual(decodeSmartResponse(framed.toString('base64')), { pools: 'y'.repeat(300) });
 });

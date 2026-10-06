@@ -6,6 +6,13 @@ export const LCD_ENDPOINTS = [
   'https://terra-api.polkachu.com',
 ];
 
+// Public RPC endpoints. Used only by the contract probe: unlike REST, RPC returns a
+// contract's rejection message in a normal response the browser is allowed to read.
+export const RPC_ENDPOINTS = [
+  'https://terra-rpc.publicnode.com',
+  'https://terra-rpc.polkachu.com',
+];
+
 // Astroport factory on phoenix-1 (from docs.astroport.fi).
 export const ASTROPORT_FACTORY = 'terra14x9fr055x5hvr48hzy2t4q7kvjvfttsvxusa4xsdcy702mnzsvuqprer8r';
 
