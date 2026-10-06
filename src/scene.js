@@ -113,17 +113,19 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     const el = document.createElement('div');
     el.className = 'mark ' + cls;
     el.textContent = title;
+    const m = { el, v, sub: null, box: null };
     if (sub) {
-      const small = document.createElement('small');
-      small.textContent = sub;
-      el.appendChild(small);
+      m.sub = document.createElement('small');
+      m.sub.textContent = sub;
+      el.appendChild(m.sub);
     }
     if (color) el.style.color = color;
     tags.appendChild(el);
-    marks.push({ el, v });
+    marks.push(m);
+    return m;
   };
   for (const s of Object.values(sectors)) mark('', s.name, '', P(PLATE_RADIUS + 1.7, s.from + s.span / 2), s.color);
-  mark('court', 'The Moon Court', 'Houses cast their votes here', new THREE.Vector3(0, 4.1, 0));
+  const court = mark('court', 'The Moon Court', 'Houses cast their votes here', new THREE.Vector3(0, 4.1, 0));
   mark('deep', 'The Interchain Deep', 'Pools outside the Alliance', P(OUTER_RING + 5.2, 135));
 
   // Systems: bodies around their shared centre. Alliance systems stand on a stem above
@@ -327,9 +329,14 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       p.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) translate(-50%,0)`;
       p.el.style.zIndex = String(2000 - Math.round(p.z * 1000));
     }
+    // Place names sit above their point and give way to any system label over them.
     for (const m of marks) {
       v3.copy(m.v).project(camera);
-      m.el.style.transform = `translate(${((v3.x * 0.5 + 0.5) * W).toFixed(1)}px,${((-v3.y * 0.5 + 0.5) * H - 4).toFixed(1)}px) translate(-50%,-100%)`;
+      const x = (v3.x * 0.5 + 0.5) * W, y = (-v3.y * 0.5 + 0.5) * H - 4;
+      if (!m.box) m.box = { w: m.el.offsetWidth, h: m.el.offsetHeight };
+      const box = { l: x - m.box.w / 2, r: x + m.box.w / 2, t: y - m.box.h, b: y };
+      m.el.classList.toggle('hid', taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t));
+      m.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;
     }
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
@@ -340,6 +347,8 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     setSystems,
     setSelected,
     setLanes(on) { lanesOn = on; if (lanes) lanes.visible = on; },
+    // Replace the line under "The Moon Court".
+    setCourt(text) { court.sub.textContent = text; court.box = null; },
     zoom,
     reset,
   };

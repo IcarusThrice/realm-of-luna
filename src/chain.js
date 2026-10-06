@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING, ERIS_BRIBES, ERIS_ESCROW } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -71,6 +71,9 @@ export async function pooled(items, limit, fn) {
     while (queue.length) await fn(queue.shift());
   }));
 }
+
+// Eris names an asset { cw20: addr } or { native: denom }; Astroport uses a longer form.
+const infoOf = (asset) => (asset.cw20 ? { token: { contract_addr: asset.cw20 } } : { native_token: { denom: asset.native } });
 
 // Turn an Astroport asset_info into { key, symbol, decimals }.
 export async function resolveAsset(info) {
@@ -183,7 +186,7 @@ async function resolveGaugeAsset(asset) {
     }
   }
   if (!out) {
-    const meta = await resolveAsset(asset.cw20 ? { token: { contract_addr: key } } : { native_token: { denom: key } });
+    const meta = await resolveAsset(infoOf(asset));
     if (meta.unresolved) return { kind: 'single', symbol: 'Unread asset', venue: 'Eris' }; // not remembered: try again next visit
     out = { kind: 'single', symbol: meta.symbol, venue: 'Eris' };
   }
@@ -235,12 +238,44 @@ export async function loadStaked(assets) {
     if (!(raw >= 0)) return;
     out[a.key] = { raw };
     if (a.kind !== 'single') return;
-    const meta = await resolveAsset(a.key.startsWith('terra1') ? { token: { contract_addr: a.key } } : { native_token: { denom: a.key } });
+    const meta = await resolveAsset(infoOf(a.key.startsWith('terra1') ? { cw20: a.key } : { native: a.key }));
     if (meta.unresolved) return; // decimals unknown: leave the amount out, do not guess
     out[a.key].key = meta.key;
     out[a.key].amount = raw / 10 ** meta.decimals;
   }));
   return out;
+}
+
+// Voter incentives on offer, from the bribe manager.
+// Returns { 'gauge assetKey': [{ key, symbol, amount }] }, amounts in whole tokens (null
+// when the token's decimals could not be read), or null if the contract cannot be read.
+export async function loadTribute() {
+  let buckets;
+  try {
+    buckets = (await smart(ERIS_BRIBES, { bribes: {} })).buckets;
+  } catch (err) {
+    return null;
+  }
+  const out = {};
+  await pooled(buckets || [], 4, async (b) => {
+    out[b.gauge + ' ' + (b.asset.cw20 || b.asset.native)] = await Promise.all(b.assets.map(async (a) => {
+      const meta = await resolveAsset(infoOf(a.info));
+      return { key: meta.key, symbol: meta.unresolved ? 'unread token' : meta.symbol, amount: meta.unresolved ? null : Number(a.amount) / 10 ** meta.decimals };
+    }));
+  });
+  return out;
+}
+
+// The voting escrow: total voting power across every lock, and how many locks exist.
+// Returns { votes, locks }, or null if it cannot be read.
+export async function loadEscrow() {
+  try {
+    const [vamp, count] = await Promise.all([smart(ERIS_ESCROW, { total_vamp: {} }), smart(ERIS_ESCROW, { num_tokens: {} })]);
+    const votes = Number(vamp.vp) / 1e6;
+    return votes > 0 ? { votes, locks: count.count } : null;
+  } catch (err) {
+    return null;
+  }
 }
 
 // Exact LUNA value of each liquid-staked token, read from its own contract.

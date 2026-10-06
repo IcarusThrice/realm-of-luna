@@ -61,10 +61,13 @@ export function rankByDepth(pools, opts) {
 //   opts.usdKey            token taken as one dollar; dollars then come from the chain itself
 //   opts.lunaUsd           fallback LUNA price when no pool holds usdKey
 //   opts.stakes            from stakesFor(): what is staked through the Alliance
+//   opts.tributes          { 'gauge assetKey': [{ key, symbol, amount }] }: voter incentives
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
 // amounts, shareA (first token's share of the value), size and tier. With stakes it also
 // gets stakedShare (part of the pool that is staked) and staked (that part's value).
 // A single-token stake has no pool: its whole mass is the staked amount.
+// With tributes, every Alliance system gets tribute: { items, value, unpriced }, where
+// value covers the tokens that have a price and unpriced counts the ones that do not.
 export function buildSystems(pools, live = {}, opts = {}) {
   const prices = priceByKey(
     pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
@@ -73,9 +76,16 @@ export function buildSystems(pools, live = {}, opts = {}) {
   const lunaUsd = opts.usdKey && prices[opts.usdKey] > 0 ? 1 / prices[opts.usdKey] : opts.lunaUsd > 0 ? opts.lunaUsd : 0;
   const unit = lunaUsd ? 'USD' : 'LUNA';
 
+  const tributeOf = (p) => {
+    if (!opts.tributes || p.outer || !p.asset) return null;
+    const items = opts.tributes[p.sector + ' ' + p.asset] || [];
+    const priced = items.filter((x) => x.amount != null && prices[x.key] > 0);
+    return { items, value: priced.reduce((t, x) => t + x.amount * prices[x.key], 0) * (lunaUsd || 1), unpriced: items.length - priced.length };
+  };
+
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
     const stake = (opts.stakes || {})[p.id];
     if (p.kind === 'single') {
       if (!stake || !(stake.amount >= 0)) return s;

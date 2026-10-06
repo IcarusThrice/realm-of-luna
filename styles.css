@@ -50,6 +50,8 @@ button, a { font: inherit; color: inherit; }
 .tag:hover { border-color: var(--dim); }
 .tag[aria-pressed="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .mark { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; font-family: var(--data); font-size: 11px; letter-spacing: 0.26em; text-transform: uppercase; }
+.mark { transition: opacity 0.15s; }
+.mark.hid { opacity: 0; }
 .mark.court { font-family: var(--display); font-size: 18px; letter-spacing: 0.04em; text-transform: none; color: var(--brass); text-align: center; }
 .mark small { display: block; font-family: var(--body); font-size: 12px; letter-spacing: 0; font-style: normal; text-transform: none; color: var(--dim); }
 .mark.deep { font-family: var(--display); font-size: 16px; letter-spacing: 0.06em; text-transform: none; font-style: italic; color: var(--dim); text-align: center; }

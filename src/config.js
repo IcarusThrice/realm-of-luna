@@ -39,14 +39,29 @@ export const ERIS_STAKING = {
   single: 'terra1qdz5qgafx88kp5mf6m2tah8742g4u5g2cek0m3jrgssexexk7g4qw6e23k',
 };
 
-// Not read by the chart yet. The probe on /discover asks these what they answer:
-// the bribe manager holds voter incentives (Tribute), a connector mints the reward token
-// the staking contracts pay out (Yield), and the voting escrow holds the locks.
+// The bribe manager lists the voter incentives on offer for each asset (Tribute).
+// The voting escrow holds every lock and reports the total voting power.
+export const ERIS_BRIBES = 'terra1tuuwm8yrj54qeg0c8xu00aha9ryatyhtczq8qq2q8tntuw0auzas9037wh';
+export const ERIS_ESCROW = 'terra1uqhj8agyeaz8fu6mdggfuwr3lp32jlrx5hqag4jxexde92rzkamq3l62zg';
+
+// Not read by the chart yet: one connector per gauge. Each stakes that gauge's Alliance
+// token with validators and turns the LUNA it earns into the rewards stakers receive, so
+// they are the way to Yield. The probe on /discover reads them, along with the chain's own
+// Alliance and inflation figures (PROBE_PATHS).
 export const ERIS_CONTRACTS = {
-  'bribe-manager': 'terra1tuuwm8yrj54qeg0c8xu00aha9ryatyhtczq8qq2q8tntuw0auzas9037wh',
   'stable-connector': 'terra1ym2495f63mdx63tu96085x2vf3xpy9z9k5urxwhvmf9jldm99q5qr4q6n8',
-  'voting-escrow': 'terra1uqhj8agyeaz8fu6mdggfuwr3lp32jlrx5hqag4jxexde92rzkamq3l62zg',
+  'project-connector': 'terra1x8v9fujf3c78q2we23x0vgzmxgtt0hgvuvfsxy4w3ar9kcua4c6qqcnhyh',
+  'bluechip-connector': 'terra16l43xt2uq09yvz4axg73n8rtm0qte9lremdwm6ph0e35r2jnm43qnl8h53',
+  'single-connector': 'terra1u72y7gppxrsncctvgfyqduv3md6pgq77pqhz9rxgwl3dqgye00cq7vmf8u',
 };
+export const PROBE_PATHS = [
+  '/terra/alliances',
+  '/terra/alliances/params',
+  '/cosmos/mint/v1beta1/annual_provisions',
+  '/cosmos/mint/v1beta1/inflation',
+  '/cosmos/staking/v1beta1/pool',
+  '/cosmos/distribution/v1beta1/params',
+];
 
 // Where the two action buttons send people until in-site actions exist.
 export const ERIS_LIQUIDITY_HUB = 'https://www.erisprotocol.com/terra/liquidity-hub';

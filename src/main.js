@@ -1,7 +1,7 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
 import { ERIS_LIQUIDITY_HUB, PEGS, USDC_INJ } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
-import { loadLive, loadAlliance, loadStaked, lunaUsd, knownRates } from './chain.js';
+import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, lunaUsd, knownRates } from './chain.js';
 import { buildSystems, mergeAlliance, stakesFor, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
 
@@ -72,8 +72,17 @@ function select(id) {
   $('v-settled-note').textContent = s.outer || s.stakedShare == null ? 'Staked through the Alliance'
     : single ? 'The whole system is the stake, live from Eris'
     : s.staked != null ? `${pct} of the pool is staked, live from Eris` : 'Staked through the Alliance, live from Eris';
-  const rewards = s.outer ? 'Not in the Alliance' : 'Not wired yet';
-  for (const key of ['v-yield', 'v-tribute']) $(key).textContent = rewards;
+  $('v-yield').textContent = s.outer ? 'Not in the Alliance' : 'Not wired yet';
+
+  // Tribute: what is on offer to the houses that vote for this system.
+  const tr = s.tribute;
+  const offered = tr && tr.items.length > 0;
+  const extra = offered && tr.unpriced ? (tr.value > 0 ? ' + ' : '') + (tr.unpriced === 1 ? '1 unpriced token' : tr.unpriced + ' unpriced tokens') : '';
+  $('v-tribute').textContent = s.outer ? 'Not in the Alliance' : !tr ? 'Not read yet' : !offered ? 'None on offer' : (tr.value > 0 ? formatMass(tr.value, s.unit) : '') + extra;
+  $('v-tribute').classList.toggle('live', !s.outer && !!tr);
+  $('v-tribute-note').textContent = offered
+    ? tr.items.map((x) => (x.amount == null ? 'an ' + x.symbol : `${formatAmount(x.amount)} ${x.symbol}`)).join(' + ') + ' on offer to voters, live from Eris'
+    : 'Paid to houses that send a fleet here';
   const hasFleet = !s.outer && typeof s.fleet === 'number';
   $('v-fleet').textContent = s.outer ? 'Not in the Alliance' : hasFleet ? (s.fleet * 100).toFixed(1) + '%' : 'Not read yet';
   $('v-fleet').classList.toggle('live', hasFleet);
@@ -124,6 +133,8 @@ function render(next) {
   $('r-outer').textContent = outside.length ? formatMass(sum(outside), unit) : 'Not read yet';
   const settled = inside.filter((s) => s.staked != null);
   $('r-settled').textContent = settled.length ? formatMass(settled.reduce((t, s) => t + s.staked, 0), unit) : 'Not read yet';
+  const paying = systems.filter((s) => s.tribute);
+  $('r-tribute').textContent = paying.length ? formatMass(paying.reduce((t, s) => t + s.tribute.value, 0), paying[0].unit) : 'Not read yet';
   $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} read live`;
 }
 
@@ -158,11 +169,14 @@ setInterval(tick, 60000);
   } catch (err) {
     console.warn('Realm of Luna: the gauge could not be read, using the built-in list.', err);
   }
-  const [{ live, supply, errors }, staked, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), lunaUsd(), knownRates()]);
+  loadEscrow().then((e) => {
+    if (e && chart) chart.setCourt(`${e.locks} locks hold ${formatAmount(e.votes)} votes`);
+  });
+  const [{ live, supply, errors }, staked, tributes, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), lunaUsd(), knownRates()]);
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
   if (Object.keys(live).length) {
     const stakes = stakesFor(pools, staked, supply);
-    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes }));
+    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes, tributes }));
   } else {
     render(buildSystems(pools));
     $('r-data').textContent = 'Chain unreachable';

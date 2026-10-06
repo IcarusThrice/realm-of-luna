@@ -1,6 +1,6 @@
 // Lists every Astroport pair with its reserves, deepest first. Read-only.
-import { ASTROPORT_FACTORY, PEGS, ERIS_CONTRACTS, ERIS_GAUGE } from './config.js';
-import { listFactoryPairs, loadPool, probeContract, rpcSmart } from './chain.js';
+import { ASTROPORT_FACTORY, PEGS, ERIS_CONTRACTS, ERIS_GAUGE, PROBE_PATHS } from './config.js';
+import { listFactoryPairs, loadPool, probeContract, rpcSmart, lcdGet } from './chain.js';
 import { rankByDepth, formatAmount } from './model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -91,6 +91,17 @@ async function probe() {
       report[name] = await probeContract(address, hints);
     } catch (err) {
       report[name] = { address, error: err.message };
+    }
+  }
+  // The chain's own Alliance and inflation figures, which set how much the gauges earn.
+  report.chain = {};
+  for (const path of PROBE_PATHS) {
+    $('probe-status').textContent = `Reading ${path}...`;
+    try {
+      const text = JSON.stringify(await lcdGet(path));
+      report.chain[path] = text.length > 9000 ? { truncated: text.slice(0, 9000) } : JSON.parse(text);
+    } catch (err) {
+      report.chain[path] = { error: err.message };
     }
   }
   $('probe-out').value = JSON.stringify(report);

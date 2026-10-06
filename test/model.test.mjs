@@ -224,3 +224,21 @@ test('a single-token stake is sized by its staked amount once the token has a pr
   assert.deepEqual(by.u.amounts, [{ symbol: 'xFOO', amount: 7 }]);
   assert.deepEqual([by.n.live, by.n.amounts], [false, null]);
 });
+
+test('tribute is valued from the tokens that have a price', () => {
+  const pools = [
+    { id: 'x', a: 'LUNA', b: 'FOO', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1', asset: 'lp-x' },
+    { id: 'y', a: 'LUNA', b: 'BAR', sector: 'stable', kind: 'pair', type: 'xyk', pair: 'p2', asset: 'lp-y' },
+    { id: 'o', a: 'LUNA', b: 'QUX', outer: true, kind: 'pair', type: 'xyk', pair: 'p4' },
+  ];
+  const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), o: pool('LUNA', 10, 'QUX', 5) };
+  const tributes = {
+    'project lp-x': [{ key: 'uluna', symbol: 'LUNA', amount: 30 }, { key: 'key-FOO', symbol: 'FOO', amount: 10 }, { key: 'key-ZZZ', symbol: 'ZZZ', amount: 9 }, { key: 'k', symbol: 'unread token', amount: null }],
+    'stable lp-x': [{ key: 'uluna', symbol: 'LUNA', amount: 999 }],
+  };
+  const by = Object.fromEntries(buildSystems(pools, live, { tributes }).map((s) => [s.id, s]));
+  assert.deepEqual([by.x.tribute.value, by.x.tribute.unpriced, by.x.tribute.items.length], [50, 2, 4]);
+  assert.deepEqual(by.y.tribute, { items: [], value: 0, unpriced: 0 }, 'read, and nothing on offer; another gauge\'s bucket does not count');
+  assert.equal(by.o.tribute, null);
+  assert.equal(buildSystems(pools, live)[0].tribute, null, 'not read');
+});

@@ -16,7 +16,9 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Settled (staked amounts) | Read live from the four Eris asset-staking contracts. For a pool it is the staked LP as a share of the LP in issue; a single-token stake is sized by its staked amount |
 | Hollow systems | Single-token stakes whose token has no price path through the pools the chart reads, and anything that could not be read |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
-| Yield and tribute (voter incentives) | Not wired yet. `/discover` has a probe that asks the Eris bribe manager, a connector and the voting escrow what they answer |
+| Tribute (voter incentives) | Read live from the Eris bribe manager: the tokens on offer for each asset, valued with the same on-chain prices. Tokens with no price path are listed by amount |
+| Voting power | Total votes and number of locks, read live from the voting escrow and shown at the Moon Court |
+| Yield | Not wired yet. `/discover` has a probe that reads the four gauge connectors and the chain's Alliance and inflation figures, which is what an estimate needs |
 
 If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 
