@@ -27,10 +27,13 @@ export const RATE_SOURCES = [
   { token: 'terra1se7rvuerys4kd2snt6vqswh9wugu49vhyzls8ymc02wl37g2p2ms5yz490', contract: 'terra1r9gls56glvuc4jedsvc3uwh6vj95mqm9efc7hnweqxa2nlme5cyqxygy5m' },
 ];
 
-// Liquidity Alliance contracts, from the links at the foot of the Eris Liquidity Hub page.
-// Not read by the chart yet; the probe on /discover asks them what queries they accept.
+// Liquidity Alliance contracts. The gauge and stable-staking addresses come from the links
+// at the foot of the Eris Liquidity Hub page; the gauge's own config names global-config.
+// The chart reads the gauge. The probe on /discover asks all three what they answer.
+export const ERIS_GAUGE = 'terra1hfksrhchkmsj4qdq33wkksrslnfles6y2l77fmmzeep0xmq24l2smsd3lj';
 export const ERIS_CONTRACTS = {
-  'asset-gauge': 'terra1hfksrhchkmsj4qdq33wkksrslnfles6y2l77fmmzeep0xmq24l2smsd3lj',
+  'global-config': 'terra1hwxg6s732eparz3ys7sa4t5f64ngpd2w8syrca6z7ckv3fs9uqnsvrpcqa',
+  'asset-gauge': ERIS_GAUGE,
   'stable-staking': 'terra1v399cx9drllm70wxfsgvfe694tdsd9x96p9ha36w7muffe4znlusqswspq',
 };
 

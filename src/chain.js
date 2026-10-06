@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -89,11 +89,15 @@ export async function resolveAsset(info) {
         storeAsset(key, out);
       } else if (key.startsWith('ibc/')) {
         const hash = key.slice(4);
+        let base;
         try {
-          out.symbol = (await lcdGet(`/ibc/apps/transfer/v1/denom_traces/${hash}`)).denom_trace.base_denom;
+          base = (await lcdGet(`/ibc/apps/transfer/v1/denom_traces/${hash}`)).denom_trace.base_denom;
         } catch (e) {
-          out.symbol = (await lcdGet(`/ibc/apps/transfer/v1/denoms/${hash}`)).denom.base;
+          base = (await lcdGet(`/ibc/apps/transfer/v1/denoms/${hash}`)).denom.base;
         }
+        // A token minted by a contract on another chain is named by its last segment.
+        out.symbol = base.startsWith('factory/') ? base.split('/').pop() : base;
+        storeAsset(key, out);
       } else if (key.startsWith('factory/')) {
         out.symbol = key.split('/').pop();
       }
@@ -119,14 +123,90 @@ export async function loadPool(pair) {
 export async function loadLive(pools) {
   const live = {};
   const errors = [];
+  const missed = [];
   await pooled(pools.filter((p) => p.pair), 6, async (p) => {
+    try {
+      live[p.id] = await loadPool(p.pair);
+    } catch (err) {
+      missed.push(p);
+    }
+  });
+  // One unhurried second try for anything a busy endpoint dropped.
+  for (const p of missed) {
     try {
       live[p.id] = await loadPool(p.pair);
     } catch (err) {
       errors.push(`${p.id}: ${err.message}`);
     }
-  });
+  }
   return { live, errors };
+}
+
+// --- The Liquidity Alliance, read from its gauge contract ---------------------------------
+// What a staked asset is never changes, so the answer is remembered between visits.
+const LP_STORE = 'realm-of-luna:lp:v1';
+function storedLp() {
+  try { return JSON.parse(localStorage.getItem(LP_STORE)) || {}; } catch (err) { return {}; }
+}
+
+// A gauge asset is either a pool's LP token or a single token staked on its own.
+// LP tokens lead back to their pool: a contract LP token names the pool as its minter,
+// and a native LP denom carries the pool's address.
+async function resolveGaugeAsset(asset) {
+  const key = asset.cw20 || asset.native;
+  const saved = storedLp()[key];
+  if (saved) return saved;
+  let pair = null;
+  try {
+    if (asset.cw20) pair = (await smart(key, { minter: {} })).minter;
+    else if (key.startsWith('factory/')) pair = key.split('/')[1];
+  } catch (err) { /* not a mintable contract token */ }
+  let out = null;
+  if (pair && /^terra1[a-z0-9]{38,}$/.test(pair)) {
+    try {
+      const t = (await smart(pair, { pair: {} })).pair_type;
+      // Astroport describes pool types as { xyk }, { stable } or { custom: "concentrated" }.
+      const astro = t && typeof t === 'object' && ('xyk' in t || 'stable' in t || 'custom' in t);
+      const type = astro ? (t.custom || Object.keys(t)[0]) : /constant/i.test(JSON.stringify(t)) ? 'xyk' : 'stable';
+      out = { kind: 'pair', pair, type, venue: astro ? 'Astroport' : 'SkeletonSwap' };
+    } catch (err) {
+      // No pair description. If it still answers as a pool, treat it as one on another exchange.
+      try {
+        if ((await smart(pair, { pool: {} })).assets.length === 2) out = { kind: 'pair', pair, type: null, venue: 'SkeletonSwap' };
+      } catch (err2) { /* the minter is not a pool */ }
+    }
+  }
+  if (!out) {
+    const meta = await resolveAsset(asset.cw20 ? { token: { contract_addr: key } } : { native_token: { denom: key } });
+    if (meta.unresolved) return { kind: 'single', symbol: 'Unread asset', venue: 'Eris' }; // not remembered: try again next visit
+    out = { kind: 'single', symbol: meta.symbol, venue: 'Eris' };
+  }
+  try {
+    const all = storedLp();
+    all[key] = out;
+    localStorage.setItem(LP_STORE, JSON.stringify(all));
+  } catch (err) { /* storage unavailable */ }
+  return out;
+}
+
+// The live Alliance: every asset in every gauge, with its share of that gauge's votes.
+// Returns { period, assets: [{ key, gauge, share, kind, pair, type, venue, symbol }] }.
+export async function loadAlliance() {
+  const gauges = await smart(ERIS_GAUGE, { distributions: {} });
+  const flat = [];
+  let period = null;
+  for (const g of gauges) {
+    period = g.period;
+    for (const a of g.assets) flat.push({ gauge: g.gauge, share: Number(a.distribution), asset: a.asset });
+  }
+  const assets = [];
+  await pooled(flat, 6, async (row) => {
+    const info = await resolveGaugeAsset(row.asset);
+    assets.push({ key: row.asset.cw20 || row.asset.native, gauge: row.gauge, share: row.share, ...info });
+  });
+  // Keep the gauge's own order: most votes first within each gauge.
+  assets.sort((x, y) => flat.findIndex((r) => (r.asset.cw20 || r.asset.native) === x.key) - flat.findIndex((r) => (r.asset.cw20 || r.asset.native) === y.key));
+  return { period, assets };
 }
 
 // Exact LUNA value of each liquid-staked token, read from its own contract.

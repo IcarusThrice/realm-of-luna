@@ -8,13 +8,14 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 
 | Part | State |
 |---|---|
-| Alliance pools and gauges | The 24 entries on the Eris Liquidity Hub, in their four gauges (Stable, Project, Bluechip, Single) |
+| Alliance pools and gauges | Read live from the Eris asset-gauge contract: every asset in the four gauges (Stable, Project, Bluechip, Single). A copy of the list in `src/realm.js` stands in if the gauge cannot be read |
+| Fleet (vote share) | Read live from the same gauge contract, per pool, for the current cycle |
 | Outer systems | Every other Astroport pool the pair finder saw with roughly $1,000 or more of depth |
-| Reserves and mass | Read live from Astroport on every load, for the 37 pools with an Astroport pair address |
+| Reserves and mass | Read live from each pool on every load |
 | Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA and arbLUNA use the exchange rate their Eris contracts report. One USDC.inj is taken as one dollar |
-| Hollow systems | Six Alliance entries the chart cannot read yet: three SkeletonSwap pools and three single-token stakes |
+| Hollow systems | Single-token stakes in the Single gauge. Their staked amounts are not read yet |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
-| Yield, fleet (vote share), tribute (voter incentives) | Not wired yet. These live in the Eris Liquidity Alliance contracts; `/discover` has a probe that asks them what they answer |
+| Yield and tribute (voter incentives) | Not wired yet. `/discover` has a probe that asks the Eris contracts what they answer |
 
 If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 

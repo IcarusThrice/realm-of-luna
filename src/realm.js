@@ -2,7 +2,9 @@
 //
 // ALLIANCE is the Terra Liquidity Alliance list, by gauge, as shown on the Eris
 // Liquidity Hub (erisprotocol.com/terra/liquidity-hub). Astroport pair addresses and
-// pool types come from the pair finder at /discover.
+// pool types come from the pair finder at /discover. At run time the chart reads the
+// real list from the Eris gauge contract; this copy lends ids, token order and crown
+// marks to matching pools, and stands in if the gauge cannot be read.
 // OUTER is every other Astroport pool the finder saw with roughly $1,000 or more of
 // depth and a price path through real liquidity. Look-alike tokens are left out.
 // Crown marks: pools named as holding chain-owned liquidity (Terra proposal 4844 and

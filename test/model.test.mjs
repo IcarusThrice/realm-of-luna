@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceByKey, rankByDepth, buildSystems, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
+import { priceByKey, rankByDepth, buildSystems, mergeAlliance, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
 import { smartPath, encodeSmartQuery, decodeSmartResponse } from '../src/chain.js';
 import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
 import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
@@ -154,4 +154,39 @@ test('RPC smart queries are encoded and decoded as protobuf', () => {
   const body = Buffer.from(JSON.stringify({ pools: 'y'.repeat(300) }));
   const framed = Buffer.concat([Buffer.from([0x0a, (body.length & 127) | 128, body.length >> 7]), body]);
   assert.deepEqual(decodeSmartResponse(framed.toString('base64')), { pools: 'y'.repeat(300) });
+});
+
+test('the gauge decides what is in the Alliance', () => {
+  const known = ALLIANCE.find((p) => p.id === 'luna-ampluna');
+  const promoted = OUTER[0];
+  const gauge = [
+    { key: 'terra1lpa', gauge: 'project', share: 0.6, kind: 'pair', pair: known.pair, type: 'concentrated', venue: 'Astroport' },
+    { key: 'terra1lpb', gauge: 'project', share: 0.3, kind: 'pair', pair: 'terra1' + 'z'.repeat(58), type: 'xyk', venue: 'SkeletonSwap' },
+    { key: 'factory/terra1hub/ampCAPA', gauge: 'single', share: 0.1, kind: 'single', symbol: 'ampCAPA', venue: 'Eris' },
+    { key: 'terra1lpc', gauge: 'stable', share: 1, kind: 'pair', pair: promoted.pair, type: promoted.type, venue: 'Astroport' },
+  ];
+  const pools = mergeAlliance(gauge, ALLIANCE, OUTER, SECTORS);
+  const [a, b, c, d] = pools;
+  assert.deepEqual([a.id, a.a, a.b, a.crown, a.fleet, a.sector], ['luna-ampluna', 'LUNA', 'ampLUNA', true, 0.6, 'project']);
+  assert.equal(b.venue, 'SkeletonSwap');
+  assert.equal(b.b, null);
+  assert.deepEqual([c.kind, c.a, c.pair, c.sector], ['single', 'ampCAPA', null, 'single']);
+  assert.deepEqual([d.sector, d.outer, d.a], ['stable', false, promoted.a]);
+  assert.equal(pools.filter((p) => p.pair === promoted.pair).length, 1, 'a promoted pool leaves the outer list');
+  assert.equal(pools.length, 4 + OUTER.length - 1);
+  assert.equal(new Set(pools.map((p) => p.id)).size, pools.length);
+});
+
+test('uncurated pools are named LUNA first, then the dollar token', () => {
+  const pools = [
+    { id: 'x', a: 'Pool abcde', b: null, sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1' },
+    { id: 'y', a: 'Pool fghij', b: null, sector: 'stable', kind: 'pair', type: 'stable', pair: 'p2' },
+  ];
+  const live = {
+    x: [asset('boneLUNA', 50), asset('LUNA', 100)],
+    y: [asset('EURe', 90), asset('USDC.inj', 100, USDC_INJ)],
+  };
+  const [x, y] = buildSystems(pools, live, { usdKey: USDC_INJ });
+  assert.equal(pairName(x), 'LUNA\u2013boneLUNA');
+  assert.equal(pairName(y), 'USDC.inj\u2013EURe');
 });

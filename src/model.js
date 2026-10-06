@@ -74,8 +74,10 @@ export function buildSystems(pools, live = {}, opts = {}) {
     const assets = live[p.id];
     const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5 };
     if (!assets || assets.length !== 2) return s;
-    // Match chain assets to the curated a/b order by symbol, else keep chain order.
-    const first = assets.find((x) => x.symbol === p.a) || assets[0];
+    // Match chain assets to the curated a/b order by symbol; otherwise lead with LUNA,
+    // then USDC.inj, the way the Eris Liquidity Hub names its pools.
+    const lead = (x) => (x.key === 'uluna' ? 0 : x.key === opts.usdKey ? 1 : 2);
+    const first = assets.find((x) => x.symbol === p.a) || (lead(assets[1]) < lead(assets[0]) ? assets[1] : assets[0]);
     const second = assets.find((x) => x !== first);
     s.a = first.symbol; s.b = second.symbol;
     s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
@@ -102,6 +104,34 @@ function hash(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
   return h;
+}
+
+// Build the pool list from the live gauge data. Every gauge asset becomes an Alliance
+// entry in its gauge's sector, carrying its share of the votes ("fleet"). Curated entries
+// lend their id, token order and crown mark when the pool address matches. Outer pools
+// that turn out to be in a gauge are dropped from the outer list.
+export function mergeAlliance(gaugeAssets, curated, outer, sectors) {
+  const byPair = new Map(curated.filter((p) => p.pair).map((p) => [p.pair, p]));
+  const outerByPair = new Map(outer.map((p) => [p.pair, p]));
+  const alliance = gaugeAssets.map((g) => {
+    const known = (g.pair && (byPair.get(g.pair) || outerByPair.get(g.pair))) || null;
+    const single = g.kind === 'single';
+    return {
+      id: known && !known.outer ? known.id : 'gauge-' + g.key.replace(/[^a-z0-9]/gi, '').slice(-16),
+      a: known ? known.a : single ? g.symbol : 'Pool ' + (g.pair || g.key).slice(-5),
+      b: known ? known.b : null,
+      sector: sectors[g.gauge] ? g.gauge : null,
+      outer: !sectors[g.gauge],
+      kind: single ? 'single' : 'pair',
+      venue: g.venue,
+      type: g.type || null,
+      crown: !!(known && known.crown),
+      pair: g.pair || null,
+      fleet: g.share,
+    };
+  });
+  const taken = new Set(alliance.map((p) => p.pair).filter(Boolean));
+  return [...alliance, ...outer.filter((p) => !taken.has(p.pair))];
 }
 
 // Place every system: polar radius, angle in degrees, and height above the plate.
