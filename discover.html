@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Realm of Luna pair finder</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;700&family=Azeret+Mono:wght@400;500&family=Marcellus&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+html, body { height: auto; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 48px; display: flex; flex-direction: column; gap: 18px; }
+.wrap h1 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 30px; color: var(--brass); }
+.wrap p { margin: 0; color: var(--dim); max-width: 65ch; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.btn { min-height: 44px; padding: 0 18px; background: var(--brass); color: var(--void); border: 1px solid var(--brass); border-radius: 2px; font-weight: 700; cursor: pointer; }
+.btn.alt { background: none; color: var(--ink); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+#status { font-family: var(--data); font-size: 13px; color: var(--ink); }
+.scroll { overflow-x: auto; border: 1px solid var(--line); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-family: var(--data); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); font-weight: 400; }
+td { font-variant-numeric: tabular-nums; }
+td.addr { font-family: var(--data); font-size: 12px; color: var(--dim); }
+textarea { width: 100%; height: 120px; background: var(--plate); color: var(--dim); border: 1px solid var(--line); border-radius: 2px; padding: 10px; font-family: var(--data); font-size: 12px; }
+#results { display: flex; flex-direction: column; gap: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pair finder</h1>
+  <p>Lists every Astroport pair on Terra with its reserves, deepest first, so pool addresses can be wired into the chart. It only reads from the chain. Expect it to take a minute or two.</p>
+  <div class="row">
+    <button type="button" class="btn" id="go">Find pairs</button>
+    <span id="status" role="status">Not started.</span>
+  </div>
+  <div id="results" hidden>
+    <div class="row">
+      <button type="button" class="btn alt" id="copy">Copy results</button>
+      <label for="out">Paste the copied results to Claude.</label>
+    </div>
+    <textarea id="out" readonly></textarea>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Pair</th><th>Reserves</th><th>Depth in LUNA</th><th>Type</th><th>Address</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<script type="module" src="src/discover.js"></script>
+</body>
+</html>

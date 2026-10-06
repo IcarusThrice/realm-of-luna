@@ -111,3 +111,33 @@ export function formatMass(value, unit) {
   if (value == null) return '';
   return unit === 'USD' ? '$' + formatAmount(value) : formatAmount(value) + ' ' + unit;
 }
+
+// Rank many pools by depth in one anchor token (default LUNA).
+// Prices spread outward from the anchor through the deepest pool first, so a thin
+// pool with a skewed ratio cannot set the price of a token a deep pool also holds.
+export function rankByDepth(pools, anchor = 'LUNA') {
+  const prices = { [anchor]: 1 };
+  const side = (p, known) => p.assets.find((a) => (a.symbol in prices) === known);
+  const todo = new Set(pools.filter((p) => p.assets && p.assets.length === 2 && p.assets.every((a) => a.amount > 0)));
+  for (;;) {
+    let best = null, bestVal = 0;
+    for (const p of todo) {
+      const priced = p.assets.filter((a) => a.symbol in prices);
+      if (priced.length === 2) { todo.delete(p); continue; }
+      if (priced.length !== 1) continue;
+      const val = priced[0].amount * prices[priced[0].symbol];
+      if (val > bestVal) { best = p; bestVal = val; }
+    }
+    if (!best) break;
+    const known = side(best, true), unknown = side(best, false);
+    prices[unknown.symbol] = bestVal / unknown.amount;
+    todo.delete(best);
+  }
+  const ranked = pools.map((p) => {
+    const vals = (p.assets || []).map((a) => (a.symbol in prices ? a.amount * prices[a.symbol] : null));
+    const known = vals.filter((v) => v != null);
+    const depth = known.length === 2 ? known[0] + known[1] : known.length === 1 ? 2 * known[0] : 0;
+    return { ...p, depth };
+  });
+  return { prices, ranked: ranked.sort((x, y) => y.depth - x.depth) };
+}

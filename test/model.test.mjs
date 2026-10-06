@@ -77,3 +77,19 @@ test('smart query path is base64 JSON', () => {
   const path = smartPath('terra1abc', { pool: {} });
   assert.equal(path, '/cosmwasm/wasm/v1/contract/terra1abc/smart/' + encodeURIComponent(btoa('{"pool":{}}')));
 });
+
+test('rankByDepth prices through the deepest pool and sorts by depth', async () => {
+  const { rankByDepth } = await import('../src/model.js');
+  const mk = (pair, a, x, b, y) => ({ pair, assets: [{ symbol: a, amount: x }, { symbol: b, amount: y }] });
+  const { prices, ranked } = rankByDepth([
+    mk('thin', 'LUNA', 1, 'USDC', 5),          // skewed, must not set the USDC price
+    mk('deep', 'LUNA', 1000, 'USDC', 50),
+    mk('btc', 'USDC', 100, 'wBTC', 0.001),
+    mk('orphan', 'FOO', 5, 'BAR', 5),
+  ]);
+  assert.equal(prices.USDC, 20);
+  assert.equal(prices.wBTC, 2000000);
+  assert.deepEqual(ranked.map((p) => p.pair), ['btc', 'deep', 'thin', 'orphan']);
+  assert.equal(ranked[0].depth, 4000);
+  assert.equal(ranked[3].depth, 0);
+});
