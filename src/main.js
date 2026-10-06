@@ -1,8 +1,8 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
 import { ERIS_LIQUIDITY_HUB, PEGS, USDC_INJ } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
-import { loadLive, loadAlliance, lunaUsd, knownRates } from './chain.js';
-import { buildSystems, mergeAlliance, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
+import { loadLive, loadAlliance, loadStaked, lunaUsd, knownRates } from './chain.js';
+import { buildSystems, mergeAlliance, stakesFor, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
@@ -29,7 +29,10 @@ if (!chart) {
 
 // One line on where the system lives and why it may be empty.
 function about(s) {
-  if (s.kind === 'single') return `A single-token stake in the ${SECTORS[s.sector].gauge} gauge. The chart cannot size these yet.`;
+  if (s.kind === 'single') {
+    const why = s.live ? '' : s.amounts ? ' The chart has no price for this token yet, so it is not sized.' : ' Its staked amount could not be read.';
+    return `A single-token stake in the ${SECTORS[s.sector].gauge} gauge.${why}`;
+  }
   const where = `${s.venue} ${POOL_TYPES[s.type] || 'pool'}`;
   const unread = s.amounts ? '' : ' Its reserves could not be read.';
   if (s.outer) return `${where}. Not in the Liquidity Alliance, so it earns no gauge rewards.${unread}`;
@@ -58,7 +61,17 @@ function select(id) {
 
   const reserves = s.amounts ? s.amounts.map((x) => `${formatAmount(x.amount)} ${x.symbol}`).join(' + ') : '';
   $('v-mass').textContent = s.live ? formatMass(s.value, s.unit) : s.amounts ? 'Not priced' : 'Not read yet';
-  $('v-mass-note').textContent = s.amounts ? `${reserves}, live from ${s.venue}` : 'Value held in the pool';
+  const single = s.kind === 'single';
+  $('v-mass-note').textContent = s.amounts ? (single ? `${reserves} staked, live from Eris` : `${reserves}, live from ${s.venue}`) : 'Value held in the pool';
+
+  // Settled: the part of the pool that is staked through the Alliance.
+  const pct = s.stakedShare == null ? '' : s.stakedShare > 0 && s.stakedShare < 0.001 ? 'under 0.1%' : (s.stakedShare * 100).toFixed(1) + '%';
+  const settled = s.outer ? 'Not in the Alliance' : s.staked != null ? formatMass(s.staked, s.unit) : pct ? pct + ' of the pool' : 'Not read yet';
+  $('v-settled').textContent = settled;
+  $('v-settled').classList.toggle('live', !s.outer && s.stakedShare != null);
+  $('v-settled-note').textContent = s.outer || s.stakedShare == null ? 'Staked through the Alliance'
+    : single ? 'The whole system is the stake, live from Eris'
+    : s.staked != null ? `${pct} of the pool is staked, live from Eris` : 'Staked through the Alliance, live from Eris';
   const rewards = s.outer ? 'Not in the Alliance' : 'Not wired yet';
   for (const key of ['v-yield', 'v-tribute']) $(key).textContent = rewards;
   const hasFleet = !s.outer && typeof s.fleet === 'number';
@@ -109,6 +122,8 @@ function render(next) {
   const unit = (inside[0] || outside[0] || {}).unit;
   $('r-mass').textContent = inside.length ? formatMass(sum(inside), unit) : 'Not read yet';
   $('r-outer').textContent = outside.length ? formatMass(sum(outside), unit) : 'Not read yet';
+  const settled = inside.filter((s) => s.staked != null);
+  $('r-settled').textContent = settled.length ? formatMass(settled.reduce((t, s) => t + s.staked, 0), unit) : 'Not read yet';
   $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} read live`;
 }
 
@@ -131,20 +146,23 @@ setInterval(tick, 60000);
   // The gauge contract is the source of truth for what is in the Alliance. If it cannot
   // be read, fall back to the list copied from the Eris Liquidity Hub.
   let pools = POOLS;
+  let gaugeAssets = [];
   try {
     const alliance = await loadAlliance();
     if (alliance.assets.length) {
-      pools = mergeAlliance(alliance.assets, ALLIANCE, OUTER, SECTORS);
+      gaugeAssets = alliance.assets;
+      pools = mergeAlliance(gaugeAssets, ALLIANCE, OUTER, SECTORS);
       period = alliance.period;
       tick();
     }
   } catch (err) {
     console.warn('Realm of Luna: the gauge could not be read, using the built-in list.', err);
   }
-  const [{ live, errors }, price, known] = await Promise.all([loadLive(pools), lunaUsd(), knownRates()]);
+  const [{ live, supply, errors }, staked, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), lunaUsd(), knownRates()]);
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
   if (Object.keys(live).length) {
-    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price }));
+    const stakes = stakesFor(pools, staked, supply);
+    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes }));
   } else {
     render(buildSystems(pools));
     $('r-data').textContent = 'Chain unreachable';

@@ -60,8 +60,11 @@ export function rankByDepth(pools, opts) {
 //   opts.pegs, opts.known  passed to pricing
 //   opts.usdKey            token taken as one dollar; dollars then come from the chain itself
 //   opts.lunaUsd           fallback LUNA price when no pool holds usdKey
+//   opts.stakes            from stakesFor(): what is staked through the Alliance
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
-// amounts, shareA (first token's share of the value), size and tier.
+// amounts, shareA (first token's share of the value), size and tier. With stakes it also
+// gets stakedShare (part of the pool that is staked) and staked (that part's value).
+// A single-token stake has no pool: its whole mass is the staked amount.
 export function buildSystems(pools, live = {}, opts = {}) {
   const prices = priceByKey(
     pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
@@ -72,7 +75,20 @@ export function buildSystems(pools, live = {}, opts = {}) {
 
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5 };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null };
+    const stake = (opts.stakes || {})[p.id];
+    if (p.kind === 'single') {
+      if (!stake || !(stake.amount >= 0)) return s;
+      s.amounts = [{ symbol: p.a, amount: stake.amount }];
+      const price = prices[stake.key];
+      if (!(price > 0) || !(stake.amount > 0)) return s;
+      s.live = true;
+      s.ghost = false;
+      s.value = s.staked = stake.amount * price * (lunaUsd || 1);
+      s.stakedShare = 1;
+      return s;
+    }
+    if (stake && stake.share >= 0) s.stakedShare = stake.share;
     if (!assets || assets.length !== 2) return s;
     // Match chain assets to the curated a/b order by symbol; otherwise lead with LUNA,
     // then USDC.inj, the way the Eris Liquidity Hub names its pools.
@@ -86,6 +102,7 @@ export function buildSystems(pools, live = {}, opts = {}) {
     s.live = true;
     s.value = depth * (lunaUsd || 1);
     s.shareA = vals[0] != null && vals[1] != null ? clamp(vals[0] / depth, 0.2, 0.8) : 0.5;
+    if (s.stakedShare != null) s.staked = s.value * s.stakedShare;
     return s;
   });
 
@@ -100,6 +117,25 @@ export function buildSystems(pools, live = {}, opts = {}) {
   return systems;
 }
 
+// Turn raw staking-contract balances into what buildSystems needs.
+//   staked: { assetKey: { raw, amount?, key? } } from the staking contracts
+//   supply: { poolId: LP tokens in issue }
+// A pool's stake becomes a share of the pool (staked LP / LP in issue). A single-token
+// stake keeps its token key and whole-token amount so it can be priced.
+export function stakesFor(pools, staked = {}, supply = {}) {
+  const out = {};
+  for (const p of pools) {
+    const st = p.asset && staked[p.asset];
+    if (!st) continue;
+    if (p.kind === 'single') {
+      if (st.amount >= 0) out[p.id] = { key: st.key, amount: st.amount };
+    } else if (supply[p.id] > 0) {
+      out[p.id] = { share: clamp(st.raw / supply[p.id], 0, 1) };
+    }
+  }
+  return out;
+}
+
 function hash(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
@@ -107,7 +143,8 @@ function hash(str) {
 }
 
 // Build the pool list from the live gauge data. Every gauge asset becomes an Alliance
-// entry in its gauge's sector, carrying its share of the votes ("fleet"). Curated entries
+// entry in its gauge's sector, carrying its share of the votes ("fleet") and the key of the
+// staked asset (the pool's LP token, or the token itself for a single stake). Curated entries
 // lend their id, token order and crown mark when the pool address matches. Outer pools
 // that turn out to be in a gauge are dropped from the outer list.
 export function mergeAlliance(gaugeAssets, curated, outer, sectors) {
@@ -127,6 +164,7 @@ export function mergeAlliance(gaugeAssets, curated, outer, sectors) {
       type: g.type || null,
       crown: !!(known && known.crown),
       pair: g.pair || null,
+      asset: g.key,
       fleet: g.share,
     };
   });

@@ -27,14 +27,25 @@ export const RATE_SOURCES = [
   { token: 'terra1se7rvuerys4kd2snt6vqswh9wugu49vhyzls8ymc02wl37g2p2ms5yz490', contract: 'terra1r9gls56glvuc4jedsvc3uwh6vj95mqm9efc7hnweqxa2nlme5cyqxygy5m' },
 ];
 
-// Liquidity Alliance contracts. The gauge and stable-staking addresses come from the links
-// at the foot of the Eris Liquidity Hub page; the gauge's own config names global-config.
-// The chart reads the gauge. The probe on /discover asks all three what they answer.
+// Liquidity Alliance contracts, as listed by Eris's own registry (global-config,
+// terra1hwxg6s732eparz3ys7sa4t5f64ngpd2w8syrca6z7ckv3fs9uqnsvrpcqa, query all_addresses).
+// The chart reads the gauge (what is in the Alliance, and each asset's share of the votes)
+// and the four staking contracts (how much of each asset is staked).
 export const ERIS_GAUGE = 'terra1hfksrhchkmsj4qdq33wkksrslnfles6y2l77fmmzeep0xmq24l2smsd3lj';
+export const ERIS_STAKING = {
+  stable: 'terra1v399cx9drllm70wxfsgvfe694tdsd9x96p9ha36w7muffe4znlusqswspq',
+  project: 'terra1awq6t7jfakg9wfjn40fk3wzwmd57mvrqtt3a39z9rmet7wdjj3ysgw3lpa',
+  bluechip: 'terra14mmvqn0kthw6sre75vku263lafn5655mkjdejqjedjga4cw0qx2qlf4arv',
+  single: 'terra1qdz5qgafx88kp5mf6m2tah8742g4u5g2cek0m3jrgssexexk7g4qw6e23k',
+};
+
+// Not read by the chart yet. The probe on /discover asks these what they answer:
+// the bribe manager holds voter incentives (Tribute), a connector mints the reward token
+// the staking contracts pay out (Yield), and the voting escrow holds the locks.
 export const ERIS_CONTRACTS = {
-  'global-config': 'terra1hwxg6s732eparz3ys7sa4t5f64ngpd2w8syrca6z7ckv3fs9uqnsvrpcqa',
-  'asset-gauge': ERIS_GAUGE,
-  'stable-staking': 'terra1v399cx9drllm70wxfsgvfe694tdsd9x96p9ha36w7muffe4znlusqswspq',
+  'bribe-manager': 'terra1tuuwm8yrj54qeg0c8xu00aha9ryatyhtczq8qq2q8tntuw0auzas9037wh',
+  'stable-connector': 'terra1ym2495f63mdx63tu96085x2vf3xpy9z9k5urxwhvmf9jldm99q5qr4q6n8',
+  'voting-escrow': 'terra1uqhj8agyeaz8fu6mdggfuwr3lp32jlrx5hqag4jxexde92rzkamq3l62zg',
 };
 
 // Where the two action buttons send people until in-site actions exist.

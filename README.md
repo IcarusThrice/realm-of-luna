@@ -13,9 +13,10 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Outer systems | Every other Astroport pool the pair finder saw with roughly $1,000 or more of depth |
 | Reserves and mass | Read live from each pool on every load |
 | Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA and arbLUNA use the exchange rate their Eris contracts report. One USDC.inj is taken as one dollar |
-| Hollow systems | Single-token stakes in the Single gauge. Their staked amounts are not read yet |
+| Settled (staked amounts) | Read live from the four Eris asset-staking contracts. For a pool it is the staked LP as a share of the LP in issue; a single-token stake is sized by its staked amount |
+| Hollow systems | Single-token stakes whose token has no price path through the pools the chart reads, and anything that could not be read |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
-| Yield and tribute (voter incentives) | Not wired yet. `/discover` has a probe that asks the Eris contracts what they answer |
+| Yield and tribute (voter incentives) | Not wired yet. `/discover` has a probe that asks the Eris bribe manager, a connector and the voting escrow what they answer |
 
 If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 

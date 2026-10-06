@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceByKey, rankByDepth, buildSystems, mergeAlliance, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
+import { priceByKey, rankByDepth, buildSystems, mergeAlliance, stakesFor, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
 import { smartPath, encodeSmartQuery, decodeSmartResponse } from '../src/chain.js';
 import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
 import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
@@ -171,6 +171,7 @@ test('the gauge decides what is in the Alliance', () => {
   assert.equal(b.venue, 'SkeletonSwap');
   assert.equal(b.b, null);
   assert.deepEqual([c.kind, c.a, c.pair, c.sector], ['single', 'ampCAPA', null, 'single']);
+  assert.deepEqual([a.asset, c.asset], ['terra1lpa', 'factory/terra1hub/ampCAPA'], 'each entry keeps the key of its staked asset');
   assert.deepEqual([d.sector, d.outer, d.a], ['stable', false, promoted.a]);
   assert.equal(pools.filter((p) => p.pair === promoted.pair).length, 1, 'a promoted pool leaves the outer list');
   assert.equal(pools.length, 4 + OUTER.length - 1);
@@ -189,4 +190,37 @@ test('uncurated pools are named LUNA first, then the dollar token', () => {
   const [x, y] = buildSystems(pools, live, { usdKey: USDC_INJ });
   assert.equal(pairName(x), 'LUNA\u2013boneLUNA');
   assert.equal(pairName(y), 'USDC.inj\u2013EURe');
+});
+
+test('a pool\'s stake is its staked LP over the LP in issue', () => {
+  const pools = [
+    { id: 'x', a: 'LUNA', b: 'FOO', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1', asset: 'lp-x' },
+    { id: 'y', a: 'LUNA', b: 'BAR', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p2', asset: 'lp-y' },
+    { id: 'z', a: 'LUNA', b: 'BAZ', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p3', asset: 'lp-z' },
+    { id: 'o', a: 'LUNA', b: 'QUX', outer: true, kind: 'pair', type: 'xyk', pair: 'p4' },
+  ];
+  const stakes = stakesFor(pools, { 'lp-x': { raw: 250 }, 'lp-y': { raw: 900 }, 'lp-z': { raw: 5 } }, { x: 1000, y: 600 });
+  assert.deepEqual(stakes, { x: { share: 0.25 }, y: { share: 1 } }, 'capped at the whole pool; no supply, no share');
+  const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), z: pool('LUNA', 10, 'BAZ', 5), o: pool('LUNA', 10, 'QUX', 5) };
+  const by = Object.fromEntries(buildSystems(pools, live, { stakes }).map((s) => [s.id, s]));
+  assert.deepEqual([by.x.value, by.x.stakedShare, by.x.staked], [200, 0.25, 50]);
+  assert.deepEqual([by.z.stakedShare, by.z.staked, by.o.staked], [null, null, null]);
+});
+
+test('a single-token stake is sized by its staked amount once the token has a price', () => {
+  const pools = [
+    { id: 'p', a: 'LUNA', b: 'CAPA', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1', asset: 'lp-p' },
+    { id: 's', a: 'CAPA', b: null, sector: 'single', kind: 'single', pair: null, asset: 'key-CAPA' },
+    { id: 'u', a: 'xFOO', b: null, sector: 'single', kind: 'single', pair: null, asset: 'key-xFOO' },
+    { id: 'n', a: 'xBAR', b: null, sector: 'single', kind: 'single', pair: null, asset: 'key-xBAR' },
+  ];
+  const staked = { 'key-CAPA': { raw: 4e6, key: 'key-CAPA', amount: 4 }, 'key-xFOO': { raw: 7e6, key: 'key-xFOO', amount: 7 }, 'key-xBAR': { raw: 1 } };
+  const stakes = stakesFor(pools, staked, {});
+  assert.deepEqual(Object.keys(stakes), ['s', 'u'], 'a stake whose decimals are unknown is left out');
+  const by = Object.fromEntries(buildSystems(pools, { p: pool('LUNA', 100, 'CAPA', 50) }, { stakes }).map((s) => [s.id, s]));
+  assert.deepEqual([by.s.live, by.s.ghost, by.s.value, by.s.staked, by.s.stakedShare], [true, false, 8, 8, 1]);
+  assert.deepEqual(by.s.amounts, [{ symbol: 'CAPA', amount: 4 }]);
+  assert.deepEqual([by.u.live, by.u.ghost, by.u.value], [false, true, null], 'no price: amount known, still hollow');
+  assert.deepEqual(by.u.amounts, [{ symbol: 'xFOO', amount: 7 }]);
+  assert.deepEqual([by.n.live, by.n.amounts], [false, null]);
 });

@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -110,36 +110,42 @@ export async function resolveAsset(info) {
   return out;
 }
 
-// One Astroport pair -> [{ key, symbol, amount }], amounts in whole tokens.
-export async function loadPool(pair) {
+// One pool -> { assets: [{ key, symbol, amount }], supply }. Amounts are in whole tokens;
+// supply is the pool's LP tokens in issue, in the token's smallest unit.
+async function readPool(pair) {
   const pool = await smart(pair, { pool: {} });
-  return Promise.all(pool.assets.map(async (a) => {
+  const assets = await Promise.all(pool.assets.map(async (a) => {
     const meta = await resolveAsset(a.info);
     return { key: meta.key, symbol: meta.symbol, amount: Number(a.amount) / 10 ** meta.decimals };
   }));
+  return { assets, supply: Number(pool.total_share) };
 }
 
-// Load every curated pool that has a pair address. Never throws: failures are reported per pool.
+// One Astroport pair -> [{ key, symbol, amount }].
+export async function loadPool(pair) {
+  return (await readPool(pair)).assets;
+}
+
+// Load every pool that has a pair address. Never throws: failures are reported per pool.
+// Returns { live: { id: assets }, supply: { id: LP tokens in issue }, errors }.
 export async function loadLive(pools) {
   const live = {};
+  const supply = {};
   const errors = [];
   const missed = [];
+  const read = async (p) => {
+    const pool = await readPool(p.pair);
+    live[p.id] = pool.assets;
+    if (pool.supply > 0) supply[p.id] = pool.supply;
+  };
   await pooled(pools.filter((p) => p.pair), 6, async (p) => {
-    try {
-      live[p.id] = await loadPool(p.pair);
-    } catch (err) {
-      missed.push(p);
-    }
+    try { await read(p); } catch (err) { missed.push(p); }
   });
   // One unhurried second try for anything a busy endpoint dropped.
   for (const p of missed) {
-    try {
-      live[p.id] = await loadPool(p.pair);
-    } catch (err) {
-      errors.push(`${p.id}: ${err.message}`);
-    }
+    try { await read(p); } catch (err) { errors.push(`${p.id}: ${err.message}`); }
   }
-  return { live, errors };
+  return { live, supply, errors };
 }
 
 // --- The Liquidity Alliance, read from its gauge contract ---------------------------------
@@ -207,6 +213,34 @@ export async function loadAlliance() {
   // Keep the gauge's own order: most votes first within each gauge.
   assets.sort((x, y) => flat.findIndex((r) => (r.asset.cw20 || r.asset.native) === x.key) - flat.findIndex((r) => (r.asset.cw20 || r.asset.native) === y.key));
   return { period, assets };
+}
+
+// How much of each Alliance asset is staked through Eris. Each gauge has its own staking
+// contract; one query lists everything staked in it.
+// Returns { assetKey: { raw, amount?, key? } }: raw is in the asset's smallest unit. A
+// single-token stake also gets its token key and its amount in whole tokens.
+// A gauge whose staking contract cannot be read is simply left out.
+export async function loadStaked(assets) {
+  const rows = {};
+  await Promise.all(Object.entries(ERIS_STAKING).map(async ([gauge, contract]) => {
+    try {
+      for (const r of await smart(contract, { total_staked_balances: {} })) {
+        rows[gauge + ' ' + (r.asset.info.cw20 || r.asset.info.native)] = Number(r.asset.amount);
+      }
+    } catch (err) { /* this gauge stays unread */ }
+  }));
+  const out = {};
+  await Promise.all(assets.map(async (a) => {
+    const raw = rows[a.gauge + ' ' + a.key];
+    if (!(raw >= 0)) return;
+    out[a.key] = { raw };
+    if (a.kind !== 'single') return;
+    const meta = await resolveAsset(a.key.startsWith('terra1') ? { token: { contract_addr: a.key } } : { native_token: { denom: a.key } });
+    if (meta.unresolved) return; // decimals unknown: leave the amount out, do not guess
+    out[a.key].key = meta.key;
+    out[a.key].amount = raw / 10 ** meta.decimals;
+  }));
+  return out;
 }
 
 // Exact LUNA value of each liquid-staked token, read from its own contract.
@@ -291,8 +325,10 @@ export async function rpcSmart(address, msg) {
 
 // Ask a contract which queries it accepts. CosmWasm answers an unknown query with the
 // list of valid ones, so one deliberately wrong question maps the whole interface.
-// Then try each query with no arguments and keep whatever comes back.
-export async function probeContract(address) {
+// Then try each query with no arguments and keep whatever comes back. When a query says it
+// is missing a field named in `hints` (a gauge name, the current period), fill it in and
+// ask again, so one run gets real answers from queries that need arguments.
+export async function probeContract(address, hints = {}) {
   const out = { address, queries: [], results: {} };
   const first = await rpcSmart(address, { realm_of_luna_probe: {} });
   const message = first.error || '';
@@ -301,10 +337,18 @@ export async function probeContract(address) {
   const listed = message.split('expected one of')[1] || '';
   out.queries = Array.from(new Set((listed.match(/`([A-Za-z0-9_]+)`/g) || []).map((s) => s.slice(1, -1))));
   for (const name of out.queries) {
-    const res = await rpcSmart(address, { [name]: {} });
-    if (res.error) { out.results[name] = { error: res.error.slice(0, 600) }; continue; }
+    const args = {};
+    let res;
+    for (let tries = 0; tries < 5; tries++) {
+      res = await rpcSmart(address, { [name]: args });
+      const missing = res.error && (res.error.match(/missing field `([A-Za-z0-9_]+)`/) || [])[1];
+      if (!missing || !(missing in hints) || missing in args) break;
+      args[missing] = hints[missing];
+    }
+    const asked = Object.keys(args).length ? { asked: args } : {};
+    if (res.error) { out.results[name] = { ...asked, error: res.error.slice(0, 600) }; continue; }
     const text = JSON.stringify(res.data);
-    out.results[name] = text.length > 6000 ? { truncated: text.slice(0, 6000) } : res.data;
+    out.results[name] = text.length > 6000 ? { ...asked, truncated: text.slice(0, 6000) } : Object.keys(asked).length ? { ...asked, answer: res.data } : res.data;
   }
   return out;
 }

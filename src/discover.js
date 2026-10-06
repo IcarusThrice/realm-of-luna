@@ -1,6 +1,6 @@
 // Lists every Astroport pair with its reserves, deepest first. Read-only.
-import { ASTROPORT_FACTORY, PEGS, ERIS_CONTRACTS } from './config.js';
-import { listFactoryPairs, loadPool, probeContract } from './chain.js';
+import { ASTROPORT_FACTORY, PEGS, ERIS_CONTRACTS, ERIS_GAUGE } from './config.js';
+import { listFactoryPairs, loadPool, probeContract, rpcSmart } from './chain.js';
 import { rankByDepth, formatAmount } from './model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -75,10 +75,20 @@ async function run() {
 async function probe() {
   $('probe').disabled = true;
   const report = {};
+  // Arguments to offer when a query asks for them: a gauge, the current period, and the
+  // most-voted asset in that gauge.
+  const hints = { gauge: 'stable' };
+  $('probe-status').textContent = 'Reading the current cycle...';
+  const now = await rpcSmart(ERIS_GAUGE, { distributions: {} });
+  if (now.data && now.data[0]) {
+    hints.period = now.data[0].period;
+    hints.gauge = now.data[0].gauge;
+    if (now.data[0].assets[0]) hints.asset = now.data[0].assets[0].asset;
+  }
   for (const [name, address] of Object.entries(ERIS_CONTRACTS)) {
     $('probe-status').textContent = `Asking ${name}...`;
     try {
-      report[name] = await probeContract(address);
+      report[name] = await probeContract(address, hints);
     } catch (err) {
       report[name] = { address, error: err.message };
     }
