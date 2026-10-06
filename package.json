@@ -1,0 +1,12 @@
+{
+  "name": "realm-of-luna",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A 3D star chart of Terra's liquidity pools. Read-only, no build step.",
+  "scripts": {
+    "test": "node --test",
+    "discover": "node scripts/discover.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

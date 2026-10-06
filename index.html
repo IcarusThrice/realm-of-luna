@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Realm of Luna</title>
+<meta name="description" content="A 3D star chart of Terra's liquidity pools. Each pool is a two-body system sized by the liquidity it holds.">
+<meta name="theme-color" content="#070a13">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;700&family=Azeret+Mono:wght@400;500&family=Marcellus&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand">
+      <h1>Realm of Luna</h1>
+      <p>Terra's liquidity pools as a star chart</p>
+    </div>
+    <dl class="readouts">
+      <div><dt>Next cycle</dt><dd id="r-cycle">Sunday 12:00 UTC</dd></div>
+      <div><dt>Realm mass</dt><dd id="r-mass">Sample data</dd></div>
+      <div><dt>Data</dt><dd id="r-data">Sample data</dd></div>
+    </dl>
+  </header>
+
+  <div class="main">
+    <section class="stage" id="stage" aria-label="Star chart of the liquidity pools">
+      <canvas id="gl"></canvas>
+      <div class="tags" id="tags"></div>
+      <div class="nogl" id="nogl" hidden>The 3D chart needs WebGL, which this browser has turned off. Every system is still listed in the panel.</div>
+      <div class="dock tl">
+        <label for="lanes"><input type="checkbox" id="lanes" checked> Trade lanes</label>
+      </div>
+      <div class="dock bl">Drag to turn the chart. Scroll or pinch to zoom.</div>
+      <div class="dock br">
+        <button type="button" id="zout" aria-label="Zoom out">&minus;</button>
+        <button type="button" id="zin" aria-label="Zoom in">+</button>
+        <button type="button" id="reset">Reset</button>
+      </div>
+    </section>
+
+    <aside class="panel">
+      <div class="head">
+        <p class="eyebrow" id="p-eyebrow"></p>
+        <h2 id="p-name"></h2>
+        <p class="pair" id="p-pair"></p>
+      </div>
+
+      <dl class="stats">
+        <div><dt>Mass<small id="v-mass-note">Value held in the pool</small></dt><dd id="v-mass" class="live"></dd></div>
+        <div><dt>Yield<small>Yearly reward rate for settlers</small></dt><dd id="v-yield"></dd></div>
+        <div><dt>Fleet<small>Share of this cycle's votes</small></dt><dd id="v-fleet"></dd></div>
+        <div><dt>Tribute<small>Paid to houses that send a fleet here</small></dt><dd id="v-tribute"></dd></div>
+      </dl>
+
+      <div class="acts">
+        <a class="go" data-eris href="https://www.erisprotocol.com/terra/liquidity-hub" target="_blank" rel="noopener"><b>Settle</b><span>Provide liquidity on Eris</span></a>
+        <a class="alt" data-eris href="https://www.erisprotocol.com/terra/liquidity-hub" target="_blank" rel="noopener"><b>Send fleet</b><span>Vote with your lock on Eris</span></a>
+      </div>
+
+      <p class="note">Read-only preview. Pool pairs are real. System names, sector placement and crown marks are placeholders, and any system marked "Sample size" is not yet reading live reserves.</p>
+
+      <div>
+        <h3>All systems</h3>
+        <div class="list" id="list"></div>
+      </div>
+
+      <div>
+        <h3>Reading the chart</h3>
+        <dl class="key">
+          <dt>Sector</dt><dd>One of the three reward gauges</dd>
+          <dt>System</dt><dd>A liquidity pool, drawn as two bodies in orbit: one for each token in the pair</dd>
+          <dt>Mass</dt><dd>The deeper the pool, the larger its bodies</dd>
+          <dt>Houses</dt><dd>Holders who lock LUNA to vote</dd>
+          <dt>Brass halo</dt><dd>A crown system: liquidity owned by the chain itself</dd>
+          <dt>Trade lanes</dt><dd>Trade flowing through the pools</dd>
+          <dt>Cycle</dt><dd>One weekly epoch of votes and rewards</dd>
+        </dl>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
