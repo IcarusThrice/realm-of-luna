@@ -200,7 +200,7 @@ test('a pool\'s stake is its staked LP over the LP in issue', () => {
     { id: 'o', a: 'LUNA', b: 'QUX', outer: true, kind: 'pair', type: 'xyk', pair: 'p4' },
   ];
   const stakes = stakesFor(pools, { 'lp-x': { raw: 250 }, 'lp-y': { raw: 900 }, 'lp-z': { raw: 5 } }, { x: 1000, y: 600 });
-  assert.deepEqual(stakes, { x: { share: 0.25 }, y: { share: 1 } }, 'capped at the whole pool; no supply, no share');
+  assert.deepEqual(stakes, { x: { share: 0.25, take: null }, y: { share: 1, take: null } }, 'capped at the whole pool; no supply, no share');
   const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), z: pool('LUNA', 10, 'BAZ', 5), o: pool('LUNA', 10, 'QUX', 5) };
   const by = Object.fromEntries(buildSystems(pools, live, { stakes }).map((s) => [s.id, s]));
   assert.deepEqual([by.x.value, by.x.stakedShare, by.x.staked], [200, 0.25, 50]);
@@ -241,4 +241,40 @@ test('tribute is valued from the tokens that have a price', () => {
   assert.deepEqual(by.y.tribute, { items: [], value: 0, unpriced: 0 }, 'read, and nothing on offer; another gauge\'s bucket does not count');
   assert.equal(by.o.tribute, null);
   assert.equal(buildSystems(pools, live)[0].tribute, null, 'not read');
+});
+
+test('a gauge earns its reward weight over one plus all weights', async () => {
+  const { gaugeEmission } = await import('../src/model.js');
+  // Figures read from phoenix-1 on 2026-10-05.
+  const alliances = [
+    { denom: 'factory/blue/vt', weight: 0.05, staked: true }, { denom: 'factory/other/vt', weight: 0.14, staked: true },
+    { denom: 'factory/single/vt', weight: 0.05, staked: true }, { denom: 'factory/project/vt', weight: 0.05, staked: true },
+    { denom: 'factory/stable/vt', weight: 0.1, staked: true }, { denom: 'factory/x/ampROAR', weight: 0, staked: true },
+    { denom: 'factory/nft/AllianceNFT', weight: 0.008, staked: true },
+  ];
+  const connectors = { stable: 'stable', project: 'project', bluechip: 'blue', single: 'single', missing: 'nope' };
+  const e = gaugeEmission({ alliances, annualProvisions: 96792696, connectors });
+  assert.deepEqual(Object.keys(e), ['stable', 'project', 'bluechip', 'single']);
+  assert.ok(Math.abs(e.stable - 96792696 * 0.1 / 1.398) < 1e-6);
+  assert.ok(Math.abs(e.stable / 96792696 - 0.07153) < 1e-5 && Math.abs(e.project / e.stable - 0.5) < 1e-12);
+  const net = gaugeEmission({ alliances, annualProvisions: 96792696, connectors, commission: 0.05 });
+  assert.ok(Math.abs(net.stable / e.stable - 0.95) < 1e-12);
+  assert.deepEqual(gaugeEmission({ alliances, annualProvisions: 0, connectors }), {});
+});
+
+test('yield is the gauge\'s LUNA times the vote share over the staked value', () => {
+  const pools = [
+    { id: 'x', a: 'LUNA', b: 'FOO', sector: 'stable', kind: 'pair', type: 'xyk', pair: 'p1', asset: 'lp-x', fleet: 0.25 },
+    { id: 'y', a: 'LUNA', b: 'BAR', sector: 'stable', kind: 'pair', type: 'xyk', pair: 'p2', asset: 'lp-y', fleet: 0.75 },
+    { id: 'z', a: 'LUNA', b: 'BAZ', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p3', asset: 'lp-z', fleet: 1 },
+    { id: 'o', a: 'LUNA', b: 'QUX', outer: true, kind: 'pair', type: 'xyk', pair: 'p4' },
+  ];
+  const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), z: pool('LUNA', 10, 'BAZ', 5), o: pool('LUNA', 10, 'QUX', 5) };
+  const stakes = stakesFor(pools, { 'lp-x': { raw: 500, take: 0.1 }, 'lp-z': { raw: 5 } }, { x: 1000, z: 10 });
+  const by = Object.fromEntries(buildSystems(pools, live, { stakes, emission: { stable: 80 } }).map((s) => [s.id, s]));
+  assert.deepEqual([by.x.staked, by.x.yield, by.x.take], [100, 0.2, 0.1]); // 80 * 0.25 / 100
+  assert.deepEqual([by.y.yield, by.z.yield, by.o.yield, by.z.take], [null, null, null, null], 'no stake, no gauge figure, or outside the Alliance');
+  // In dollars both sides scale by the same LUNA price, so the rate does not change.
+  const usd = buildSystems(pools, live, { stakes, emission: { stable: 80 }, lunaUsd: 0.05 }).find((s) => s.id === 'x');
+  assert.ok(Math.abs(usd.yield - 0.2) < 1e-12);
 });

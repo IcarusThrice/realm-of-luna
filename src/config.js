@@ -44,16 +44,19 @@ export const ERIS_STAKING = {
 export const ERIS_BRIBES = 'terra1tuuwm8yrj54qeg0c8xu00aha9ryatyhtczq8qq2q8tntuw0auzas9037wh';
 export const ERIS_ESCROW = 'terra1uqhj8agyeaz8fu6mdggfuwr3lp32jlrx5hqag4jxexde92rzkamq3l62zg';
 
-// Not read by the chart yet: one connector per gauge. Each stakes that gauge's Alliance
-// token with validators and turns the LUNA it earns into the rewards stakers receive, so
-// they are the way to Yield. The probe on /discover reads them, along with the chain's own
-// Alliance and inflation figures (PROBE_PATHS).
-export const ERIS_CONTRACTS = {
-  'stable-connector': 'terra1ym2495f63mdx63tu96085x2vf3xpy9z9k5urxwhvmf9jldm99q5qr4q6n8',
-  'project-connector': 'terra1x8v9fujf3c78q2we23x0vgzmxgtt0hgvuvfsxy4w3ar9kcua4c6qqcnhyh',
-  'bluechip-connector': 'terra16l43xt2uq09yvz4axg73n8rtm0qte9lremdwm6ph0e35r2jnm43qnl8h53',
-  'single-connector': 'terra1u72y7gppxrsncctvgfyqduv3md6pgq77pqhz9rxgwl3dqgye00cq7vmf8u',
+// One connector per gauge. Each owns an Alliance token (factory/<connector>/vt), stakes it
+// with validators, and turns the LUNA it earns into the rewards that gauge's stakers
+// receive. The chain's Alliance module sets how much each of those tokens earns, which is
+// what the Yield estimate is built from.
+export const ERIS_CONNECTORS = {
+  stable: 'terra1ym2495f63mdx63tu96085x2vf3xpy9z9k5urxwhvmf9jldm99q5qr4q6n8',
+  project: 'terra1x8v9fujf3c78q2we23x0vgzmxgtt0hgvuvfsxy4w3ar9kcua4c6qqcnhyh',
+  bluechip: 'terra16l43xt2uq09yvz4axg73n8rtm0qte9lremdwm6ph0e35r2jnm43qnl8h53',
+  single: 'terra1u72y7gppxrsncctvgfyqduv3md6pgq77pqhz9rxgwl3dqgye00cq7vmf8u',
 };
+
+// What the probe on /discover reads: the connectors, and the chain's own figures.
+export const ERIS_CONTRACTS = Object.fromEntries(Object.entries(ERIS_CONNECTORS).map(([gauge, addr]) => [gauge + '-connector', addr]));
 export const PROBE_PATHS = [
   '/terra/alliances',
   '/terra/alliances/params',

@@ -1,8 +1,8 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
-import { ERIS_LIQUIDITY_HUB, PEGS, USDC_INJ } from './config.js';
+import { ERIS_LIQUIDITY_HUB, ERIS_CONNECTORS, PEGS, USDC_INJ } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
-import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, lunaUsd, knownRates } from './chain.js';
-import { buildSystems, mergeAlliance, stakesFor, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
+import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, lunaUsd, knownRates } from './chain.js';
+import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
 
 const $ = (id) => document.getElementById(id);
@@ -12,6 +12,8 @@ let systems = [];
 let selected = POOLS[0].id;
 let listEls = {};
 let period = null;
+let yieldBasis = null; // null until the chain's reward figures are read; then { commission }
+const percent = (x) => (x >= 10 ? 'over 1,000%' : (x * 100).toFixed(x < 0.1 ? 1 : 0) + '%');
 
 const chart = createChart({
   stage: $('stage'),
@@ -72,7 +74,13 @@ function select(id) {
   $('v-settled-note').textContent = s.outer || s.stakedShare == null ? 'Staked through the Alliance'
     : single ? 'The whole system is the stake, live from Eris'
     : s.staked != null ? `${pct} of the pool is staked, live from Eris` : 'Staked through the Alliance, live from Eris';
-  $('v-yield').textContent = s.outer ? 'Not in the Alliance' : 'Not wired yet';
+  // Yield: an estimate of the LUNA rewards stakers earn in a year, over the value staked.
+  const hasYield = !s.outer && s.yield != null;
+  $('v-yield').textContent = s.outer ? 'Not in the Alliance' : hasYield ? `~${percent(s.yield)} est.` : !yieldBasis ? 'Not read yet' : 'Needs a staked value';
+  $('v-yield').classList.toggle('live', hasYield);
+  $('v-yield-note').textContent = !hasYield ? 'Yearly reward rate for settlers'
+    : `LUNA rewards on the staked value, estimated from Terra's inflation and this cycle's votes${yieldBasis.commission == null ? ', before validator commission' : ''}.`
+      + (s.take > 0 ? ` The Alliance also takes ${percent(s.take)} of the stake each year.` : '') + ' Swap fees are not counted.';
 
   // Tribute: what is on offer to the houses that vote for this system.
   const tr = s.tribute;
@@ -172,11 +180,13 @@ setInterval(tick, 60000);
   loadEscrow().then((e) => {
     if (e && chart) chart.setCourt(`${e.locks} locks hold ${formatAmount(e.votes)} votes`);
   });
-  const [{ live, supply, errors }, staked, tributes, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), lunaUsd(), knownRates()]);
+  const [{ live, supply, errors }, staked, tributes, chainPay, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), loadEmission(), lunaUsd(), knownRates()]);
+  const emission = chainPay ? gaugeEmission({ ...chainPay, connectors: ERIS_CONNECTORS }) : {};
+  if (Object.keys(emission).length) yieldBasis = { commission: chainPay.commission };
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
   if (Object.keys(live).length) {
     const stakes = stakesFor(pools, staked, supply);
-    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes, tributes }));
+    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes, tributes, emission }));
   } else {
     render(buildSystems(pools));
     $('r-data').textContent = 'Chain unreachable';

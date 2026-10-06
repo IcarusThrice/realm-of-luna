@@ -62,12 +62,15 @@ export function rankByDepth(pools, opts) {
 //   opts.lunaUsd           fallback LUNA price when no pool holds usdKey
 //   opts.stakes            from stakesFor(): what is staked through the Alliance
 //   opts.tributes          { 'gauge assetKey': [{ key, symbol, amount }] }: voter incentives
+//   opts.emission          from gaugeEmission(): LUNA each gauge earns per year
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
 // amounts, shareA (first token's share of the value), size and tier. With stakes it also
 // gets stakedShare (part of the pool that is staked) and staked (that part's value).
 // A single-token stake has no pool: its whole mass is the staked amount.
 // With tributes, every Alliance system gets tribute: { items, value, unpriced }, where
 // value covers the tokens that have a price and unpriced counts the ones that do not.
+// With emission, a system with a staked value and a share of the votes gets yield: the
+// LUNA its stakers earn in a year over the value staked (0.5 is 50%). It is an estimate.
 export function buildSystems(pools, live = {}, opts = {}) {
   const prices = priceByKey(
     pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
@@ -116,6 +119,13 @@ export function buildSystems(pools, live = {}, opts = {}) {
     return s;
   });
 
+  const emission = opts.emission || {};
+  for (const s of systems) {
+    const perYear = emission[s.sector];
+    s.take = ((opts.stakes || {})[s.id] || {}).take ?? null;
+    s.yield = !s.outer && perYear > 0 && s.staked > 0 && s.fleet >= 0 ? (perYear * s.fleet * (lunaUsd || 1)) / s.staked : null;
+  }
+
   // Size by live mass. A power curve keeps a $20K pool visibly smaller than a $1M pool
   // without vanishing. Anything not read yet takes the smallest size.
   const liveVals = systems.filter((s) => s.live).map((s) => s.value);
@@ -137,11 +147,29 @@ export function stakesFor(pools, staked = {}, supply = {}) {
   for (const p of pools) {
     const st = p.asset && staked[p.asset];
     if (!st) continue;
+    const take = st.take >= 0 ? st.take : null;
     if (p.kind === 'single') {
-      if (st.amount >= 0) out[p.id] = { key: st.key, amount: st.amount };
+      if (st.amount >= 0) out[p.id] = { key: st.key, amount: st.amount, take };
     } else if (supply[p.id] > 0) {
-      out[p.id] = { share: clamp(st.raw / supply[p.id], 0, 1) };
+      out[p.id] = { share: clamp(st.raw / supply[p.id], 0, 1), take };
     }
+  }
+  return out;
+}
+
+// LUNA each gauge earns per year, from the chain's Alliance module.
+// Every Alliance token has a reward weight w. The module gives it staking power equal to
+// w times the native stake, so it earns w / (1 + sum of all weights) of what the chain
+// mints for stakers. Each gauge's connector owns one such token: factory/<connector>/vt.
+//   alliances: [{ denom, weight, staked }]   annualProvisions: LUNA minted per year
+//   connectors: { gauge: connectorAddress }  commission: validators' mean cut, or null
+export function gaugeEmission({ alliances = [], annualProvisions = 0, connectors = {}, commission = null } = {}) {
+  const earning = alliances.filter((a) => a.weight > 0 && a.staked !== false);
+  const total = 1 + earning.reduce((t, a) => t + a.weight, 0);
+  const out = {};
+  for (const [gauge, addr] of Object.entries(connectors)) {
+    const a = earning.find((x) => x.denom === `factory/${addr}/vt`);
+    if (a && annualProvisions > 0) out[gauge] = annualProvisions * (a.weight / total) * (1 - (commission || 0));
   }
   return out;
 }

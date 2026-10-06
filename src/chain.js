@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING, ERIS_BRIBES, ERIS_ESCROW } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING, ERIS_BRIBES, ERIS_ESCROW, ERIS_CONNECTORS } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -220,23 +220,25 @@ export async function loadAlliance() {
 
 // How much of each Alliance asset is staked through Eris. Each gauge has its own staking
 // contract; one query lists everything staked in it.
-// Returns { assetKey: { raw, amount?, key? } }: raw is in the asset's smallest unit. A
-// single-token stake also gets its token key and its amount in whole tokens.
+// Returns { assetKey: { raw, take, amount?, key? } }: raw is in the asset's smallest unit
+// and take is the share of the stake the Alliance takes each year. A single-token stake
+// also gets its token key and its amount in whole tokens.
 // A gauge whose staking contract cannot be read is simply left out.
 export async function loadStaked(assets) {
   const rows = {};
   await Promise.all(Object.entries(ERIS_STAKING).map(async ([gauge, contract]) => {
     try {
       for (const r of await smart(contract, { total_staked_balances: {} })) {
-        rows[gauge + ' ' + (r.asset.info.cw20 || r.asset.info.native)] = Number(r.asset.amount);
+        rows[gauge + ' ' + (r.asset.info.cw20 || r.asset.info.native)] = { raw: Number(r.asset.amount), take: Number(r.config && r.config.yearly_take_rate) };
       }
     } catch (err) { /* this gauge stays unread */ }
   }));
   const out = {};
   await Promise.all(assets.map(async (a) => {
-    const raw = rows[a.gauge + ' ' + a.key];
-    if (!(raw >= 0)) return;
-    out[a.key] = { raw };
+    const row = rows[a.gauge + ' ' + a.key];
+    if (!row || !(row.raw >= 0)) return;
+    const raw = row.raw;
+    out[a.key] = { raw, take: row.take >= 0 ? row.take : null };
     if (a.kind !== 'single') return;
     const meta = await resolveAsset(infoOf(a.key.startsWith('terra1') ? { cw20: a.key } : { native: a.key }));
     if (meta.unresolved) return; // decimals unknown: leave the amount out, do not guess
@@ -263,6 +265,34 @@ export async function loadTribute() {
       return { key: meta.key, symbol: meta.unresolved ? 'unread token' : meta.symbol, amount: meta.unresolved ? null : Number(a.amount) / 10 ** meta.decimals };
     }));
   });
+  return out;
+}
+
+// What the chain pays the Alliance: LUNA minted per year, each Alliance token's reward
+// weight, and the mean commission of the validators the connectors stake with.
+// Returns { annualProvisions, alliances, commission } for gaugeEmission(), or null.
+// commission is null when the validator set could not be read.
+export async function loadEmission() {
+  let out;
+  try {
+    const [mint, all] = await Promise.all([lcdGet('/cosmos/mint/v1beta1/annual_provisions'), lcdGet('/terra/alliances')]);
+    out = {
+      annualProvisions: Number(mint.annual_provisions) / 1e6,
+      alliances: all.alliances.map((a) => ({ denom: a.denom, weight: Number(a.reward_weight), staked: Number(a.total_tokens) > 0 })),
+      commission: null,
+    };
+  } catch (err) {
+    return null;
+  }
+  try {
+    const [mine, set] = await Promise.all([
+      smart(ERIS_CONNECTORS.stable, { validators: {} }),
+      lcdGet('/cosmos/staking/v1beta1/validators?pagination.limit=500'),
+    ]);
+    const rate = new Map(set.validators.map((v) => [v.operator_address, Number(v.commission.commission_rates.rate)]));
+    const rates = mine.map((v) => rate.get(v)).filter((r) => r >= 0);
+    if (rates.length) out.commission = rates.reduce((t, r) => t + r, 0) / rates.length;
+  } catch (err) { /* the estimate is then before commission */ }
   return out;
 }
 
