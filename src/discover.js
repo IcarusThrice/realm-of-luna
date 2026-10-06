@@ -1,6 +1,6 @@
 // Lists every Astroport pair with its reserves, deepest first. Read-only.
-import { ASTROPORT_FACTORY, PEGS } from './config.js';
-import { listFactoryPairs, loadPool } from './chain.js';
+import { ASTROPORT_FACTORY, PEGS, ERIS_CONTRACTS } from './config.js';
+import { listFactoryPairs, loadPool, probeContract } from './chain.js';
 import { rankByDepth, formatAmount } from './model.js';
 
 const $ = (id) => document.getElementById(id);
@@ -39,7 +39,7 @@ async function run() {
   for (const p of failed) await read(p, stillFailed);
 
   // Depth is measured from native LUNA, so look-alike tokens cannot inflate it.
-  const { ranked } = rankByDepth(rows, { pegs: PEGS });
+  const { ranked } = rankByDepth(rows, { pegs: PEGS, floor: 100 });
   const shown = ranked.filter((r) => r.depth >= 500);
   const body = $('rows');
   body.textContent = '';
@@ -71,15 +71,38 @@ async function run() {
   $('go').disabled = false;
 }
 
-$('go').addEventListener('click', run);
-$('copy').addEventListener('click', async () => {
-  const out = $('out');
+// Ask the Eris Liquidity Alliance contracts which queries they accept, then try each one.
+async function probe() {
+  $('probe').disabled = true;
+  const report = {};
+  for (const [name, address] of Object.entries(ERIS_CONTRACTS)) {
+    $('probe-status').textContent = `Asking ${name}...`;
+    try {
+      report[name] = await probeContract(address);
+    } catch (err) {
+      report[name] = { address, error: err.message };
+    }
+  }
+  $('probe-out').value = JSON.stringify(report);
+  $('probe-results').hidden = false;
+  const found = Object.values(report).reduce((n, r) => n + ((r.queries || []).length), 0);
+  $('probe-status').textContent = found ? `Done. The contracts listed ${found} queries.` : 'Done, but the contracts did not list their queries. Copy the result anyway.';
+  $('probe').disabled = false;
+}
+
+async function copyFrom(areaId, buttonId) {
+  const out = $(areaId);
   try {
     await navigator.clipboard.writeText(out.value);
-    $('copy').textContent = 'Copied';
+    $(buttonId).textContent = 'Copied';
   } catch (err) {
     out.focus();
     out.select();
-    $('copy').textContent = 'Selected: press Ctrl or Cmd + C';
+    $(buttonId).textContent = 'Selected: press Ctrl or Cmd + C';
   }
-});
+}
+
+$('go').addEventListener('click', run);
+$('probe').addEventListener('click', probe);
+$('probe-copy').addEventListener('click', () => copyFrom('probe-out', 'probe-copy'));
+$('copy').addEventListener('click', () => copyFrom('out', 'copy'));

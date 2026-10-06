@@ -16,7 +16,7 @@ html, body { height: auto; }
 .btn { min-height: 44px; padding: 0 18px; background: var(--brass); color: var(--void); border: 1px solid var(--brass); border-radius: 2px; font-weight: 700; cursor: pointer; }
 .btn.alt { background: none; color: var(--ink); }
 .btn:disabled { opacity: 0.5; cursor: default; }
-#status { font-family: var(--data); font-size: 13px; color: var(--ink); }
+#status, .status { font-family: var(--data); font-size: 13px; color: var(--ink); }
 .scroll { overflow-x: auto; border: 1px solid var(--line); }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -24,7 +24,8 @@ th { font-family: var(--data); font-size: 11px; letter-spacing: 0.12em; text-tra
 td { font-variant-numeric: tabular-nums; }
 td.addr { font-family: var(--data); font-size: 12px; color: var(--dim); }
 textarea { width: 100%; height: 120px; background: var(--plate); color: var(--dim); border: 1px solid var(--line); border-radius: 2px; padding: 10px; font-family: var(--data); font-size: 12px; }
-#results { display: flex; flex-direction: column; gap: 14px; }
+#results, .block { display: flex; flex-direction: column; gap: 14px; }
+.wrap h1 + p { margin-top: -8px; }
 </style>
 </head>
 <body>
@@ -47,6 +48,20 @@ textarea { width: 100%; height: 120px; background: var(--plate); color: var(--di
         <tbody id="rows"></tbody>
       </table>
     </div>
+  </div>
+
+  <h1>Eris contract probe</h1>
+  <p>Asks the Liquidity Alliance contracts which questions they answer, then tries each one. It only reads. This is how the chart learns to show votes and rewards.</p>
+  <div class="row">
+    <button type="button" class="btn" id="probe">Probe Eris contracts</button>
+    <span id="probe-status" class="status" role="status">Not started.</span>
+  </div>
+  <div id="probe-results" class="block" hidden>
+    <div class="row">
+      <button type="button" class="btn alt" id="probe-copy">Copy probe results</button>
+      <label for="probe-out">Paste the copied results to Claude.</label>
+    </div>
+    <textarea id="probe-out" readonly></textarea>
   </div>
 </div>
 <script type="module" src="src/discover.js"></script>

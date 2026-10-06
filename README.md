@@ -1,6 +1,6 @@
 # Realm of Luna
 
-A 3D star chart of Terra's liquidity pools. Each pool is drawn as a two-body system: one body per token in the pair, sized by the liquidity the pool holds. The Moon sits at the centre, and the three sectors of the plate stand for the three Liquidity Alliance reward gauges.
+A 3D star chart of Terra's liquidity pools. Each pool is drawn as a two-body system: one body per token in the pair, sized by the liquidity the pool holds. The Moon sits at the centre, and the four sectors of the plate are the four Liquidity Alliance reward gauges. Pools outside the Alliance drift beyond the rim.
 
 The site is read-only. It never asks for a wallet and never builds a transaction. The two action buttons open the Eris Liquidity Hub.
 
@@ -8,12 +8,13 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 
 | Part | State |
 |---|---|
-| Pools shown | The deepest Astroport pools on Terra, found with the pair finder at `/discover` |
-| Reserves and mass | Read live from Astroport on every load |
-| Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA uses the Eris hub's exchange rate. Dollar figures use CoinGecko's LUNA price |
-| Crown systems | The two pools holding protocol-owned liquidity from Terra proposal 4844 |
-| System names, sector placement | Placeholders |
-| Yield, fleet (vote share), tribute (voter incentives) | Not wired yet. These live in the Eris Liquidity Alliance contracts |
+| Alliance pools and gauges | The 24 entries on the Eris Liquidity Hub, in their four gauges (Stable, Project, Bluechip, Single) |
+| Outer systems | Every other Astroport pool the pair finder saw with roughly $1,000 or more of depth |
+| Reserves and mass | Read live from Astroport on every load, for the 37 pools with an Astroport pair address |
+| Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA and arbLUNA use the exchange rate their Eris contracts report. One USDC.inj is taken as one dollar |
+| Hollow systems | Six Alliance entries the chart cannot read yet: three SkeletonSwap pools and three single-token stakes |
+| Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
+| Yield, fleet (vote share), tribute (voter incentives) | Not wired yet. These live in the Eris Liquidity Alliance contracts; `/discover` has a probe that asks them what they answer |
 
 If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 
@@ -33,7 +34,7 @@ Any static host works. On Cloudflare Pages: connect this repo, leave the build c
 
 ## Add pools
 
-Open `/discover` on the deployed site (or run `npm run discover`). It lists every Astroport pair with its reserves, deepest first. Add an entry to `POOLS` in `src/realm.js` with the pair address and pool type.
+Open `/discover` on the deployed site (or run `npm run discover`). It lists every Astroport pair with its reserves, deepest first. Add an entry to `ALLIANCE` or `OUTER` in `src/realm.js` with the pair address and pool type. Name any new bridged token in `KNOWN_ASSETS` in `src/config.js`.
 
 ## Layout
 

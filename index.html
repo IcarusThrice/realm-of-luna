@@ -20,8 +20,9 @@
     </div>
     <dl class="readouts">
       <div><dt>Next cycle</dt><dd id="r-cycle">Sunday 12:00 UTC</dd></div>
-      <div><dt>Realm mass</dt><dd id="r-mass">Sample data</dd></div>
-      <div><dt>Data</dt><dd id="r-data">Sample data</dd></div>
+      <div><dt>Alliance mass</dt><dd id="r-mass">Not read yet</dd></div>
+      <div><dt>Outside it</dt><dd id="r-outer">Not read yet</dd></div>
+      <div><dt>Data</dt><dd id="r-data">Reading the chain</dd></div>
     </dl>
   </header>
 
@@ -46,6 +47,7 @@
         <p class="eyebrow" id="p-eyebrow"></p>
         <h2 id="p-name"></h2>
         <p class="pair" id="p-pair"></p>
+        <p class="about" id="p-about"></p>
       </div>
 
       <dl class="stats">
@@ -55,12 +57,12 @@
         <div><dt>Tribute<small>Paid to houses that send a fleet here</small></dt><dd id="v-tribute"></dd></div>
       </dl>
 
-      <div class="acts">
+      <div class="acts" id="acts">
         <a class="go" data-eris href="https://www.erisprotocol.com/terra/liquidity-hub" target="_blank" rel="noopener"><b>Settle</b><span>Provide liquidity on Eris</span></a>
         <a class="alt" data-eris href="https://www.erisprotocol.com/terra/liquidity-hub" target="_blank" rel="noopener"><b>Send fleet</b><span>Vote with your lock on Eris</span></a>
       </div>
 
-      <p class="note">Read-only preview. Pairs and reserves are read live from Astroport. System names and sector placement are placeholders. <a href="/discover">Open the pair finder</a>.</p>
+      <p class="note">Read-only preview. The gauges follow the Eris Liquidity Hub, and reserves are read live from Astroport. Hollow systems are known but not readable yet. <a href="/discover">Open the pair finder</a>.</p>
 
       <div>
         <h3>All systems</h3>
@@ -70,12 +72,13 @@
       <div>
         <h3>Reading the chart</h3>
         <dl class="key">
-          <dt>Sector</dt><dd>One of the three reward gauges</dd>
-          <dt>System</dt><dd>A liquidity pool, drawn as two bodies in orbit: one for each token in the pair</dd>
+          <dt>Sector</dt><dd>One of the four reward gauges: Stable, Project, Bluechip, Single</dd>
+          <dt>System</dt><dd>A liquidity pool, drawn as two bodies in orbit: one for each token in the pair. A single-token stake is a lone star</dd>
           <dt>Mass</dt><dd>The deeper the pool, the larger its bodies</dd>
+          <dt>Outer orbit</dt><dd>Pools outside the Alliance. They float beyond the rim with no stem and no trade lane</dd>
+          <dt>Hollow</dt><dd>Known to the Alliance but not readable by the chart yet</dd>
+          <dt>Brass halo</dt><dd>A crown system: it holds liquidity owned by the chain itself</dd>
           <dt>Houses</dt><dd>Holders who lock LUNA to vote</dd>
-          <dt>Brass halo</dt><dd>A crown system: liquidity owned by the chain itself</dd>
-          <dt>Trade lanes</dt><dd>Trade flowing through the pools</dd>
           <dt>Cycle</dt><dd>One weekly epoch of votes and rewards</dd>
         </dl>
       </div>

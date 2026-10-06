@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceByKey, rankByDepth, buildSystems, layout, nextCycle, formatCountdown, formatMass } from '../src/model.js';
+import { priceByKey, rankByDepth, buildSystems, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
 import { smartPath } from '../src/chain.js';
-import { POOLS, SECTORS } from '../src/realm.js';
-import { PEGS } from '../src/config.js';
+import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
+import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
 
 const asset = (symbol, amount, key = symbol === 'LUNA' ? 'uluna' : 'key-' + symbol) => ({ key, symbol, amount });
 const pool = (a, x, b, y) => [asset(a, x), asset(b, y)];
@@ -27,6 +27,17 @@ test('a token that only calls itself LUNA does not anchor prices', () => {
   assert.equal(ranked[0].depth, 2000);
 });
 
+test('a pool below the floor sets no price', () => {
+  const pools = [
+    { pair: 'dust', type: 'xyk', assets: pool('LUNA', 5, 'JUNK', 1) },
+    { pair: 'junk', type: 'xyk', assets: [asset('JUNK', 1e9), asset('TRASH', 1e9)] },
+  ];
+  assert.equal(rankByDepth(pools).ranked[0].pair, 'junk');
+  const guarded = rankByDepth(pools, { floor: 100 });
+  assert.equal(guarded.prices['key-JUNK'], undefined);
+  assert.equal(guarded.ranked.find((p) => p.pair === 'junk').depth, 0);
+});
+
 test('pegged tokens share a price once one of them is priced', () => {
   const prices = priceByKey([
     { type: 'xyk', assets: pool('LUNA', 1000, 'USDC', 50) },
@@ -47,59 +58,72 @@ test('xyk pools set prices before deeper pools of other types, and known prices 
   assert.equal(priceByKey(pools, { known: { 'key-ampLUNA': 3.8 } })['key-ampLUNA'], 3.8);
 });
 
-test('with no live data every system keeps its sample size', () => {
+test('with no live data every system is uncharted', () => {
   const systems = buildSystems(POOLS);
   assert.equal(systems.length, POOLS.length);
-  assert.ok(systems.every((s) => !s.live && s.value === null && s.amounts === null));
-  assert.equal(systems.find((s) => s.id === 'tidewatch').tier, 'Stronghold');
-  assert.equal(systems.find((s) => s.id === 'bedrock').tier, 'Outpost');
+  assert.ok(systems.every((s) => !s.live && s.value === null && s.amounts === null && s.tier === 'Uncharted'));
+  assert.equal(systems.filter((s) => s.ghost).length, 6);
 });
 
-test('a live pool reports mass in LUNA, or dollars when a LUNA price is known', () => {
-  const live = { tidewatch: [asset('ampLUNA', 100), asset('LUNA', 300)] };
-  const inLuna = buildSystems(POOLS, live).find((s) => s.id === 'tidewatch');
+test('mass is in dollars when the dollar token is priced on chain, else LUNA', () => {
+  const live = { 'luna-ampluna': [asset('ampLUNA', 100), asset('LUNA', 300)] };
+  const inLuna = buildSystems(POOLS, live).find((s) => s.id === 'luna-ampluna');
   assert.equal(inLuna.live, true);
   assert.equal(inLuna.unit, 'LUNA');
   assert.equal(inLuna.value, 600);
   assert.equal(inLuna.a, 'LUNA');
   assert.equal(inLuna.shareA, 0.5);
-  const inUsd = buildSystems(POOLS, live, { lunaUsd: 0.05 }).find((s) => s.id === 'tidewatch');
+  live['luna-usdc-inj'] = [asset('LUNA', 2000), asset('USDC.inj', 100, USDC_INJ)];
+  const inUsd = buildSystems(POOLS, live, { usdKey: USDC_INJ }).find((s) => s.id === 'luna-ampluna');
   assert.equal(inUsd.unit, 'USD');
   assert.equal(inUsd.value, 30);
+  const fallback = buildSystems(POOLS, { 'luna-ampluna': live['luna-ampluna'] }, { usdKey: USDC_INJ, lunaUsd: 0.1 }).find((s) => s.id === 'luna-ampluna');
+  assert.equal(fallback.value, 60);
 });
 
 test('a pool with no price path keeps its reserves but is not counted as live', () => {
-  const s = buildSystems(POOLS, { twinmints: [asset('USDC', 10), asset('USDT', 12)] }).find((x) => x.id === 'twinmints');
+  const s = buildSystems(POOLS, { 'usdc-inj-usdt': [asset('USDC.inj', 10), asset('USDT', 12)] }).find((x) => x.id === 'usdc-inj-usdt');
   assert.equal(s.live, false);
   assert.equal(s.amounts.length, 2);
 });
 
-test('with three or more live pools, sizes follow live mass', () => {
+test('sizes follow live mass', () => {
   const live = {
-    tidewatch: pool('LUNA', 10000000, 'ampLUNA', 3000000),
-    starbridge: pool('ATOM', 10000, 'LUNA', 400000),
-    goldspire: pool('LUNA', 6000, 'wBTC', 0.004),
+    'luna-ampluna': pool('LUNA', 10000000, 'ampLUNA', 3000000),
+    'luna-atom': pool('ATOM', 10000, 'LUNA', 400000),
+    'luna-inj': pool('LUNA', 6000, 'INJ', 40),
   };
   const by = Object.fromEntries(buildSystems(POOLS, live).map((s) => [s.id, s]));
-  assert.equal(by.tidewatch.size, 1);
-  assert.equal(by.tidewatch.tier, 'Stronghold');
-  assert.ok(by.goldspire.size > 0.42 && by.goldspire.size < by.starbridge.size);
-  assert.ok(by.starbridge.size < 1);
-  assert.equal(by.bedrock.size, 0.42);
+  assert.equal(by['luna-ampluna'].size, 1);
+  assert.equal(by['luna-ampluna'].tier, 'Stronghold');
+  assert.ok(by['luna-inj'].size > 0.42 && by['luna-inj'].size < by['luna-atom'].size);
+  assert.ok(by['luna-atom'].size < 1);
 });
 
-test('every curated pool has a pair address and the pegs are distinct keys', () => {
-  assert.ok(POOLS.every((p) => /^terra1[a-z0-9]{58}$/.test(p.pair)), 'pair addresses');
-  assert.equal(new Set(POOLS.map((p) => p.pair)).size, POOLS.length);
+test('the curated lists are well formed', () => {
+  assert.equal(ALLIANCE.length, 24);
+  assert.deepEqual(Object.fromEntries(Object.keys(SECTORS).map((k) => [k, ALLIANCE.filter((p) => p.sector === k).length])), { stable: 3, project: 8, bluechip: 6, single: 7 });
+  const withPair = POOLS.filter((p) => p.pair);
+  assert.ok(withPair.every((p) => /^terra1[a-z0-9]{58}$/.test(p.pair) && p.type), 'pair addresses and types');
+  assert.equal(new Set(withPair.map((p) => p.pair)).size, withPair.length);
   assert.equal(new Set(POOLS.map((p) => p.id)).size, POOLS.length);
+  assert.ok(OUTER.every((p) => p.outer && p.pair && p.sector === null));
+  assert.ok(ALLIANCE.every((p) => SECTORS[p.sector] && !p.outer));
   assert.equal(new Set(PEGS.flat()).size, PEGS.flat().length);
+  assert.ok(PEGS.flat().every((k) => KNOWN_ASSETS[k]));
+  const symbols = POOLS.flatMap((p) => [p.a, p.b]).filter(Boolean);
+  assert.deepEqual(symbols.filter((s) => !TOKENS[s]), [], 'every curated token has a colour');
+  const sweep = Object.values(SECTORS).reduce((t, s) => t + s.span, 0);
+  assert.equal(sweep, 360);
 });
 
-test('layout keeps each system inside its sector wedge', () => {
+test('layout keeps Alliance systems in their wedge and outer systems beyond the rim', () => {
   for (const s of layout(buildSystems(POOLS), SECTORS)) {
-    const from = SECTORS[s.sector].from;
-    assert.ok(s.deg > from && s.deg < from + 120, `${s.id} at ${s.deg}`);
-    assert.ok(s.r > 0 && s.r < 14 && s.y > 0);
+    assert.ok(s.y > 0);
+    if (s.outer) { assert.ok(s.r > PLATE_RADIUS + 2, `${s.id} r ${s.r}`); continue; }
+    const { from, span } = SECTORS[s.sector];
+    assert.ok(s.deg > from && s.deg < from + span, `${s.id} at ${s.deg}`);
+    assert.ok(s.r > 0 && s.r < PLATE_RADIUS);
   }
 });
 
@@ -113,6 +137,8 @@ test('formatting', () => {
   assert.equal(formatCountdown(5 * 86400000 + 3 * 3600000), '5d 3h');
   assert.equal(formatMass(1234567, 'USD'), '$1.23M');
   assert.equal(formatMass(400, 'LUNA'), '400.00 LUNA');
+  assert.equal(pairName({ a: 'LUNA', b: 'USDC.inj' }), 'LUNA–USDC.inj');
+  assert.equal(pairName({ a: 'ampCAPA', b: null }), 'ampCAPA');
 });
 
 test('smart query path is base64 JSON', () => {

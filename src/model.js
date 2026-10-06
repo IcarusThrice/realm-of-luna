@@ -9,9 +9,10 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // Prices spread outward from native LUNA. Constant-product (xyk) pools go first because
 // their reserve ratio is the price; other pool types are only an approximation. Within a
 // type the deepest pool goes first, so a thin skewed pool cannot set a price a deep pool
-// also knows. `known` seeds exact prices (ampLUNA from the Eris hub). `pegs` are groups
-// of keys valued alike (dollar stablecoins).
-export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {} } = {}) {
+// also knows. A pool whose priced side is worth less than `floor` LUNA sets no price at
+// all. `known` seeds exact prices (ampLUNA from the Eris hub). `pegs` are groups of keys
+// valued alike (dollar stablecoins).
+export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {}, floor = 0 } = {}) {
   const prices = { ...known, [anchor]: 1 };
   const setPrice = (key, price) => {
     prices[key] = price;
@@ -28,8 +29,9 @@ export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {} } = 
       const priced = p.assets.filter((a) => a.key in prices);
       if (priced.length === 2) { todo.delete(p); continue; }
       if (priced.length !== 1) continue;
-      const rank = p.type === 'xyk' ? 0 : 1;
       const val = priced[0].amount * prices[priced[0].key];
+      if (val < floor) continue;
+      const rank = p.type === 'xyk' ? 0 : 1;
       if (rank < bestRank || (rank === bestRank && val > bestVal)) { best = p; bestVal = val; bestRank = rank; }
     }
     if (!best) break;
@@ -55,18 +57,22 @@ export function rankByDepth(pools, opts) {
 }
 
 // Merge the curated pools with live reserves.
-// opts.lunaUsd converts mass to dollars when known; opts.pegs and opts.known go to pricing.
+//   opts.pegs, opts.known  passed to pricing
+//   opts.usdKey            token taken as one dollar; dollars then come from the chain itself
+//   opts.lunaUsd           fallback LUNA price when no pool holds usdKey
+// Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
+// amounts, shareA (first token's share of the value), size and tier.
 export function buildSystems(pools, live = {}, opts = {}) {
   const prices = priceByKey(
     pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
     { pegs: opts.pegs || [], known: opts.known || {} },
   );
-  const usd = opts.lunaUsd > 0;
-  const unit = usd ? 'USD' : 'LUNA';
+  const lunaUsd = opts.usdKey && prices[opts.usdKey] > 0 ? 1 / prices[opts.usdKey] : opts.lunaUsd > 0 ? opts.lunaUsd : 0;
+  const unit = lunaUsd ? 'USD' : 'LUNA';
 
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, live: false, value: null, unit, amounts: null, shareA: 0.72 };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5 };
     if (!assets || assets.length !== 2) return s;
     // Match chain assets to the curated a/b order by symbol, else keep chain order.
     const first = assets.find((x) => x.symbol === p.a) || assets[0];
@@ -76,20 +82,18 @@ export function buildSystems(pools, live = {}, opts = {}) {
     const { vals, depth } = poolDepth([first, second], prices);
     if (!(depth > 0)) return s;
     s.live = true;
-    s.value = depth * (usd ? opts.lunaUsd : 1);
+    s.value = depth * (lunaUsd || 1);
     s.shareA = vals[0] != null && vals[1] != null ? clamp(vals[0] / depth, 0.2, 0.8) : 0.5;
     return s;
   });
 
-  // Size by live mass once enough pools are live to compare; until then use sample sizes.
-  // A power curve keeps a $20K pool visibly smaller than a $1M pool without vanishing.
+  // Size by live mass. A power curve keeps a $20K pool visibly smaller than a $1M pool
+  // without vanishing. Anything not read yet takes the smallest size.
   const liveVals = systems.filter((s) => s.live).map((s) => s.value);
-  const useLive = liveVals.length >= 3;
-  const top = Math.max(...liveVals);
+  const top = liveVals.length ? Math.max(...liveVals) : 0;
   for (const s of systems) {
-    if (useLive) s.size = s.live ? 0.42 + 0.58 * Math.pow(s.value / top, 0.3) : 0.42;
-    else s.size = clamp(s.sampleSize || 0.54, 0.42, 1);
-    s.tier = s.size >= 0.87 ? 'Stronghold' : s.size >= 0.6 ? 'Colony' : 'Outpost';
+    s.size = s.live ? 0.42 + 0.58 * Math.pow(s.value / top, 0.3) : 0.5;
+    s.tier = !s.live ? 'Uncharted' : s.size >= 0.87 ? 'Stronghold' : s.size >= 0.6 ? 'Colony' : 'Outpost';
   }
   return systems;
 }
@@ -100,21 +104,33 @@ function hash(str) {
   return h;
 }
 
-// Place each system inside its sector's 120 degree wedge: polar radius, angle, height.
-// Neighbours alternate between three rings so their labels have room.
-const RINGS = [7, 11.2, 9.1];
+// Place every system: polar radius, angle in degrees, and height above the plate.
+// Alliance systems sit inside their gauge's wedge, neighbours alternating between three
+// rings so labels have room. Outer systems ring the plate beyond its rim.
+export const PLATE_RADIUS = 14;
+const RINGS = [5.8, 11.8, 8.8];
+const OUTER_RINGS = [18.2, 21.4];
 export function layout(systems, sectors) {
   const bySector = {};
-  for (const s of systems) (bySector[s.sector] = bySector[s.sector] || []).push(s);
+  const outer = [];
+  for (const s of systems) {
+    if (s.outer || !sectors[s.sector]) outer.push(s);
+    else (bySector[s.sector] = bySector[s.sector] || []).push(s);
+  }
   for (const key of Object.keys(bySector)) {
     const list = bySector[key];
-    const from = sectors[key] ? sectors[key].from : 0;
+    const { from, span } = sectors[key];
     list.forEach((s, i) => {
-      s.deg = from + 120 * (i + 0.5) / list.length;
+      s.deg = from + span * (i + 0.5) / list.length;
       s.r = RINGS[i % RINGS.length];
-      s.y = 1.5 + (hash(s.id) % 20) / 10;
+      s.y = 1.4 + (hash(s.id) % 20) / 10;
     });
   }
+  outer.forEach((s, i) => {
+    s.deg = (360 * (i + 0.5)) / outer.length;
+    s.r = OUTER_RINGS[i % OUTER_RINGS.length];
+    s.y = 0.4 + (hash(s.id) % 26) / 10;
+  });
   return systems;
 }
 
@@ -145,4 +161,9 @@ export function formatAmount(v) {
 export function formatMass(value, unit) {
   if (value == null) return '';
   return unit === 'USD' ? '$' + formatAmount(value) : formatAmount(value) + ' ' + unit;
+}
+
+// "LUNA–USDC.inj" for a pair, "ampCAPA" for a single-token stake.
+export function pairName(s) {
+  return s.b ? `${s.a}–${s.b}` : s.a;
 }
