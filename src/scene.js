@@ -1,6 +1,7 @@
 // The 3D star chart. Uses the global THREE loaded by index.html.
 // createChart() returns null when WebGL is unavailable, and the page falls back to the list.
 import { PLATE_RADIUS, pairName } from './model.js';
+import { paintSky, makeStars, paintMoon, makeAtmosphere, glowTexture, makeBelt } from './space.js';
 
 const BRASS = '#d0aa5c';
 const LINE = '#3a4560';
@@ -128,26 +129,36 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     new THREE.LineBasicMaterial({ color, transparent: opacity < 1, opacity }),
   );
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.55);
-  sun.position.set(8, 20, 12);
+  // Light: a low ambient so shadowed sides stay dark, a warm key light from one side, a
+  // cool fill from the other, and the Moon itself shining outward from the centre.
+  scene.add(new THREE.AmbientLight(0xbfc8e6, 0.34));
+  const sun = new THREE.DirectionalLight(0xfff4de, 0.8);
+  sun.position.set(14, 16, 9);
   scene.add(sun);
-  const moonLight = new THREE.PointLight(0xfff2cf, 0.8, 0);
-  moonLight.position.set(0, 2.2, 0);
+  const fill = new THREE.DirectionalLight(0x5d7fd6, 0.28);
+  fill.position.set(-12, 5, -10);
+  scene.add(fill);
+  const moonLight = new THREE.PointLight(0xfff0c8, 0.95, 0);
+  moonLight.position.set(0, 2.6, 0);
   scene.add(moonLight);
 
-  // Stars.
-  {
-    const pts = [];
-    for (let i = 0; i < 1400; i++) {
-      const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, d = 320 + Math.random() * 260;
-      const q = Math.sqrt(1 - u * u);
-      pts.push(d * q * Math.cos(t), d * u, d * q * Math.sin(t));
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xcfd6ea, size: 2.2, sizeAttenuation: true, transparent: true, opacity: 0.75 })));
-  }
+  // The deep sky. Stars are there at once; the painted backdrop (galactic band, gas
+  // clouds) takes a moment to draw and fades in when ready.
+  const pixelRatio = renderer.getPixelRatio();
+  const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+  const stars = makeStars(THREE, small ? 2600 : 4200, pixelRatio);
+  scene.add(stars);
+  const skyMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide, depthWrite: false, transparent: true, opacity: 0 });
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(900, 48, 32), skyMat);
+  sky.renderOrder = -2;
+  scene.add(sky);
+  let skyFade = -1; // -1 until the backdrop is painted, then 0..1 as it fades in
+  paintSky(small ? 1024 : 1536, small ? 512 : 768, (canvasSky) => {
+    skyMat.map = new THREE.CanvasTexture(canvasSky);
+    skyMat.needsUpdate = true;
+    skyFade = 0;
+  });
+  const twinkling = [stars];
 
   // The plate: one wedge per gauge, range rings, rim ticks.
   const circle = (r, n = 128) => {
@@ -174,6 +185,11 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     for (let i = 0; i < 72; i++) pts.push(P(PLATE_RADIUS, i * 5), P(PLATE_RADIUS - (i % 6 === 0 ? 0.7 : 0.32), i * 5));
     scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: BRASS, transparent: true, opacity: 0.7 })));
   }
+  // A belt of dust between the Alliance's plate and the outer orbit.
+  const belt = makeBelt(THREE, PLATE_RADIUS + 1.1, OUTER_RING - 2.4, small ? 900 : 1600, pixelRatio);
+  scene.add(belt);
+  twinkling.push(belt);
+
   // The outer orbit: where pools outside the Alliance drift.
   {
     const far = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(circle(OUTER_RING, 180)), new THREE.LineDashedMaterial({ color: 0x6b7591, dashSize: 0.35, gapSize: 0.55, transparent: true, opacity: 0.55 }));
@@ -182,26 +198,42 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   }
 
   // The Moon Court at the centre.
-  const glow = (hex) => {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const x = c.getContext('2d');
-    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-    g.addColorStop(0, hex); g.addColorStop(0.25, hex + '88'); g.addColorStop(1, hex + '00');
-    x.fillStyle = g;
-    x.fillRect(0, 0, 128, 128);
-    return new THREE.CanvasTexture(c);
-  };
+  // A real moon: seas, highlands and craters, lit from one side, with its own soft glow so
+  // the night side never goes black. It turns slowly.
+  const moonArt = paintMoon(small ? 768 : 1024, small ? 384 : 512);
+  const moonMap = new THREE.CanvasTexture(moonArt.colour);
+  moonMap.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const moon = new THREE.Mesh(
-    new THREE.SphereGeometry(1.5, 40, 28),
-    new THREE.MeshStandardMaterial({ color: 0xf1e6b8, emissive: 0xb9a56a, emissiveIntensity: 0.55, roughness: 0.9 }),
+    new THREE.SphereGeometry(2.05, 64, 44),
+    new THREE.MeshStandardMaterial({
+      map: moonMap, bumpMap: new THREE.CanvasTexture(moonArt.relief), bumpScale: 0.05, roughness: 1, metalness: 0,
+      emissive: 0xffe6b0, emissiveMap: moonMap, emissiveIntensity: 0.62,
+    }),
   );
-  moon.position.set(0, 2.2, 0);
+  moon.position.set(0, 2.6, 0);
+  moon.rotation.set(0.2, 2.2, 0.08);
   scene.add(moon);
-  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow('#f1e6b8'), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }));
-  halo.scale.set(9, 9, 1);
-  halo.position.copy(moon.position);
-  scene.add(halo);
+  // Moonlight in the air around it: a tight warm corona and a wide faint bloom.
+  const addGlow = (stops, scale, opacity) => {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(THREE, stops), transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending }));
+    sprite.scale.set(scale, scale, 1);
+    sprite.position.copy(moon.position);
+    scene.add(sprite);
+    return sprite;
+  };
+  addGlow([[0, 'rgba(255,240,205,0.9)'], [0.3, 'rgba(255,232,180,0.42)'], [0.55, 'rgba(255,220,160,0.12)'], [1, 'rgba(255,220,160,0)']], 12, 0.85);
+  addGlow([[0, 'rgba(190,205,255,0.32)'], [0.4, 'rgba(150,170,255,0.1)'], [1, 'rgba(150,170,255,0)']], 30, 0.6);
+  // And a pool of moonlight on the plate beneath it.
+  {
+    const pool = new THREE.Mesh(
+      new THREE.CircleGeometry(PLATE_RADIUS * 0.72, 64),
+      new THREE.MeshBasicMaterial({ map: glowTexture(THREE, [[0, 'rgba(255,236,190,0.5)'], [0.35, 'rgba(255,226,170,0.16)'], [1, 'rgba(255,226,170,0)']]), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }),
+    );
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = 0.012;
+    scene.add(pool);
+  }
+  const atmosphere = makeAtmosphere(THREE);
   scene.add(line([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.7, 0)], BRASS));
 
   // Fixed lettering, projected each frame.
@@ -259,6 +291,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   function clearSystems() {
     if (group) {
       group.traverse((o) => {
+        if (o.userData.shared) return; // glow shells share one geometry and material set
         if (o.geometry) o.geometry.dispose();
         if (o.material) o.material.dispose();
       });
@@ -312,14 +345,15 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
         const c = tokens[sym] || unknownColor;
         const mat = s.ghost
           ? new THREE.MeshBasicMaterial({ color: c, wireframe: true, transparent: true, opacity: 0.45 })
-          : new THREE.MeshStandardMaterial({ color: c, roughness: 0.65, emissive: c, emissiveIntensity: s.outer ? 0.1 : 0.18 });
+          : new THREE.MeshStandardMaterial({ color: c, roughness: 0.58, metalness: 0.05, emissive: c, emissiveIntensity: s.outer ? 0.1 : 0.16 });
         const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, s.ghost ? 12 : 40, s.ghost ? 8 : 28), mat);
+        if (!s.ghost) atmosphere(mesh, r, c, s.outer ? 0.7 : 1);
         if (logo) {
           surface(logo, c).then((tex) => {
             if (!tex || !mesh.parent) return; // logo missing, or the chart was redrawn meanwhile
             mat.map = tex; mat.emissiveMap = tex;
             mat.color.set(0xffffff); mat.emissive.set(0xffffff);
-            mat.emissiveIntensity = s.outer ? 0.3 : 0.38;
+            mat.emissiveIntensity = s.outer ? 0.26 : 0.32;
             mat.needsUpdate = true;
           });
           // Planets with a logo turn on an upright axis, so the logo stays level.
@@ -438,10 +472,17 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const v3 = new THREE.Vector3();
   const upright = new THREE.Quaternion(), turned = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
-  let last = performance.now();
+  let last = performance.now(), clock = 0;
   const frame = (now) => {
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
     if (!still) for (const s of spinners) s.g.rotation.y += s.v * dt;
+    if (!still) {
+      clock += dt;
+      for (const t of twinkling) t.material.uniforms.uTime.value = clock;
+      moon.rotation.y += 0.02 * dt;
+      belt.rotation.y += 0.004 * dt;
+    }
+    if (skyFade >= 0 && skyFade < 1) { skyFade = Math.min(1, skyFade + dt / 1.4); skyMat.opacity = skyFade; }
     // Undo the system's tilt and orbit for each logo planet, then turn it about the vertical.
     for (const b of bodies) {
       if (!still) b.turn += b.v * dt;
@@ -491,7 +532,8 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       const x = (v3.x * 0.5 + 0.5) * W, y = (-v3.y * 0.5 + 0.5) * H - 4;
       if (!m.box) m.box = { w: m.el.offsetWidth, h: m.el.offsetHeight };
       const box = { l: x - m.box.w / 2, r: x + m.box.w / 2, t: y - m.box.h, b: y };
-      m.el.classList.toggle('hid', taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t));
+      const cut = box.l < 0 || box.r > W || box.t < 0 || box.b > H;
+      m.el.classList.toggle('hid', cut || taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t));
       m.el.style.transform = `translate(${x.toFixed(1)}px,${y.toFixed(1)}px) translate(-50%,-100%)`;
     }
     renderer.render(scene, camera);
