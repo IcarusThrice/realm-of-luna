@@ -257,8 +257,6 @@ test('a gauge earns its reward weight over one plus all weights', async () => {
   assert.deepEqual(Object.keys(e), ['stable', 'project', 'bluechip', 'single']);
   assert.ok(Math.abs(e.stable - 96792696 * 0.1 / 1.398) < 1e-6);
   assert.ok(Math.abs(e.stable / 96792696 - 0.07153) < 1e-5 && Math.abs(e.project / e.stable - 0.5) < 1e-12);
-  const net = gaugeEmission({ alliances, annualProvisions: 96792696, connectors, commission: 0.05 });
-  assert.ok(Math.abs(net.stable / e.stable - 0.95) < 1e-12);
   assert.deepEqual(gaugeEmission({ alliances, annualProvisions: 0, connectors }), {});
 });
 
@@ -272,11 +270,12 @@ test('yield is the gauge\'s LUNA times the vote share over the staked value', ()
   const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), z: pool('LUNA', 10, 'BAZ', 5), o: pool('LUNA', 10, 'QUX', 5) };
   const stakes = stakesFor(pools, { 'lp-x': { raw: 500, take: 0.1 }, 'lp-z': { raw: 5 } }, { x: 1000, z: 10 });
   const by = Object.fromEntries(buildSystems(pools, live, { stakes, emission: { stable: 80 } }).map((s) => [s.id, s]));
-  assert.deepEqual([by.x.staked, by.x.yield, by.x.take], [100, 0.2, 0.1]); // 80 * 0.25 / 100
+  assert.deepEqual([by.x.staked, by.x.rewardRate, by.x.take], [100, 0.2, 0.1]); // 80 * 0.25 / 100
+  assert.ok(Math.abs(by.x.yield - 0.1) < 1e-12, 'yield is the reward rate less the take');
   assert.deepEqual([by.y.yield, by.z.yield, by.o.yield, by.z.take], [null, null, null, null], 'no stake, no gauge figure, or outside the Alliance');
   // In dollars both sides scale by the same LUNA price, so the rate does not change.
   const usd = buildSystems(pools, live, { stakes, emission: { stable: 80 }, lunaUsd: 0.05 }).find((s) => s.id === 'x');
-  assert.ok(Math.abs(usd.yield - 0.2) < 1e-12);
+  assert.ok(Math.abs(usd.rewardRate - 0.2) < 1e-12);
 });
 
 test('logos are matched by token key, and by name only for this project\'s own list', async () => {
@@ -296,4 +295,19 @@ test('logos are matched by token key, and by name only for this project\'s own l
   assert.deepEqual(logosFor(buildSystems([{ id: 'y', a: 'LUNA', b: 'EURe', sector: 'stable', kind: 'pair', pair: 'p2' }])[0]), ['assets/tokens/luna.png', 'assets/tokens/eure.png']);
   const single = buildSystems([{ id: 's', a: 'ampCAPA', b: null, sector: 'single', kind: 'single', pair: null, asset: 'factory/terra186rpfczl7l2kugdsqqedegl4es4hp624phfc7ddy8my02a4e8lgq5rlx7y/ampCAPA' }])[0];
   assert.deepEqual(logosFor(single), ['assets/tokens/ampcapa.png', null]);
+});
+
+test('the yield formula reproduces the Eris Liquidity Hub figures of 2026-10-07', async () => {
+  const { gaugeEmission } = await import('../src/model.js');
+  // Chain figures from the probe of 2026-10-05; Eris's yearly reward dollars from its hub.
+  const alliances = [0.05, 0.14, 0.05, 0.05, 0.1, 0.008].map((weight, i) => ({ denom: `factory/c${i}/vt`, weight, staked: true }));
+  const e = gaugeEmission({ alliances, annualProvisions: 96792696.088, connectors: { stable: 'c4', project: 'c3' } });
+  const eris = [
+    ['stable', 0.293186, 95750], ['stable', 0.646673, 211190], ['stable', 0.060141, 19640],
+    ['project', 0.032320, 5277.70], ['project', 0.036489, 5958.51], ['project', 0.282622, 46150],
+  ];
+  // Every pool must imply the same LUNA price, and a believable one.
+  const prices = eris.map(([gauge, fleet, usd]) => usd / (e[gauge] * fleet));
+  for (const p of prices) assert.ok(Math.abs(p / prices[0] - 1) < 0.001, 'one price fits all six pools');
+  assert.ok(prices[0] > 0.045 && prices[0] < 0.05);
 });

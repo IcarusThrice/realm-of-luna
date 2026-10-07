@@ -13,8 +13,8 @@ let systems = [];
 let selected = POOLS[0].id;
 let listEls = {};
 let period = null;
-let yieldBasis = null; // null until the chain's reward figures are read; then { commission }
-const percent = (x) => (x >= 10 ? 'over 1,000%' : (x * 100).toFixed(x < 0.1 ? 1 : 0) + '%');
+let yieldRead = false; // true once the chain's reward figures are read
+const percent = (x) => (x >= 10 ? 'over 1,000%' : (x < 0 ? '\u2212' : '') + (Math.abs(x) * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + '%');
 
 const chart = createChart({
   stage: $('stage'),
@@ -78,13 +78,13 @@ function select(id) {
   $('v-settled-note').textContent = s.outer || s.stakedShare == null ? 'Staked through the Alliance'
     : single ? 'The whole system is the stake, live from Eris'
     : s.staked != null ? `${pct} of the pool is staked, live from Eris` : 'Staked through the Alliance, live from Eris';
-  // Yield: an estimate of the LUNA rewards stakers earn in a year, over the value staked.
+  // Yield: LUNA rewards on the staked value, less the Alliance's take. An estimate.
   const hasYield = !s.outer && s.yield != null;
-  $('v-yield').textContent = s.outer ? 'Not in the Alliance' : hasYield ? `~${percent(s.yield)} est.` : !yieldBasis ? 'Not read yet' : 'Needs a staked value';
+  $('v-yield').textContent = s.outer ? 'Not in the Alliance' : hasYield ? `~${percent(s.yield)} est.` : !yieldRead ? 'Not read yet' : 'Needs a staked value';
   $('v-yield').classList.toggle('live', hasYield);
   $('v-yield-note').textContent = !hasYield ? 'Yearly reward rate for settlers'
-    : `LUNA rewards on the staked value, estimated from Terra's inflation and this cycle's votes${yieldBasis.commission == null ? ', before validator commission' : ''}.`
-      + (s.take > 0 ? ` The Alliance also takes ${percent(s.take)} of the stake each year.` : '') + ' Swap fees are not counted.';
+    : `${percent(s.rewardRate)} a year in LUNA rewards on the staked value` + (s.take > 0 ? `, less the Alliance's ${percent(s.take)} yearly take` : '')
+      + '. Swap fees are not counted.';
 
   // Tribute: what is on offer to the houses that vote for this system.
   const tr = s.tribute;
@@ -186,7 +186,7 @@ setInterval(tick, 60000);
   });
   const [{ live, supply, errors }, staked, tributes, chainPay, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), loadEmission(), lunaUsd(), knownRates()]);
   const emission = chainPay ? gaugeEmission({ ...chainPay, connectors: ERIS_CONNECTORS }) : {};
-  if (Object.keys(emission).length) yieldBasis = { commission: chainPay.commission };
+  if (Object.keys(emission).length) yieldRead = true;
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
   if (Object.keys(live).length) {
     const stakes = stakesFor(pools, staked, supply);

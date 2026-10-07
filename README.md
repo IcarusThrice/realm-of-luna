@@ -20,7 +20,7 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
 | Tribute (voter incentives) | Read live from the Eris bribe manager: the tokens on offer for each asset, valued with the same on-chain prices. Tokens with no price path are listed by amount |
 | Voting power | Total votes and number of locks, read live from the voting escrow and shown at the Moon Court |
-| Yield | An estimate, not a figure Eris reports. Each gauge's connector owns an Alliance token; the chain's Alliance module pays it `weight / (1 + sum of all weights)` of the LUNA minted for stakers each year. That, less the mean commission of the connector's validators, times the pool's vote share, over the value staked, is the rate shown. It leaves out swap fees, exchange incentives and the Alliance's yearly take on staked tokens (shown beside it) |
+| Yield | An estimate. Each gauge's connector owns an Alliance token; the chain's Alliance module pays it `weight / (1 + sum of all weights)` of the LUNA minted for stakers each year. That, times the pool's vote share, over the value staked, is the reward rate; the yield shown is that rate less the Alliance's yearly take on staked tokens. Checked against the Eris Liquidity Hub on 2026-10-07: six pools across two gauges matched. Eris's APR also adds each pool's swap fees, which the chart leaves out |
 
 If no chain endpoint answers, the chart shows sample sizes and says so in the header.
 

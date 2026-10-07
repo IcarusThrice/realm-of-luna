@@ -1,5 +1,5 @@
 // Read-only chain access. Works in the browser and in Node 18+ (used by scripts/discover.mjs).
-import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING, ERIS_BRIBES, ERIS_ESCROW, ERIS_CONNECTORS } from './config.js';
+import { LCD_ENDPOINTS, RPC_ENDPOINTS, KNOWN_ASSETS, RENAMED, LUNA_PRICE_URL, RATE_SOURCES, ERIS_GAUGE, ERIS_STAKING, ERIS_BRIBES, ERIS_ESCROW } from './config.js';
 
 let preferred = 0;
 const assetCache = new Map();
@@ -268,32 +268,18 @@ export async function loadTribute() {
   return out;
 }
 
-// What the chain pays the Alliance: LUNA minted per year, each Alliance token's reward
-// weight, and the mean commission of the validators the connectors stake with.
-// Returns { annualProvisions, alliances, commission } for gaugeEmission(), or null.
-// commission is null when the validator set could not be read.
+// What the chain pays the Alliance: LUNA minted per year and each Alliance token's reward
+// weight. Returns { annualProvisions, alliances } for gaugeEmission(), or null.
 export async function loadEmission() {
-  let out;
   try {
     const [mint, all] = await Promise.all([lcdGet('/cosmos/mint/v1beta1/annual_provisions'), lcdGet('/terra/alliances')]);
-    out = {
+    return {
       annualProvisions: Number(mint.annual_provisions) / 1e6,
-      alliances: all.alliances.map((a) => ({ denom: a.denom, weight: Number(a.reward_weight), staked: Number(a.total_tokens) > 0 })),
-      commission: null,
+      alliances: all.alliances.map((x) => ({ denom: x.denom, weight: Number(x.reward_weight), staked: Number(x.total_tokens) > 0 })),
     };
   } catch (err) {
     return null;
   }
-  try {
-    const [mine, set] = await Promise.all([
-      smart(ERIS_CONNECTORS.stable, { validators: {} }),
-      lcdGet('/cosmos/staking/v1beta1/validators?pagination.limit=500'),
-    ]);
-    const rate = new Map(set.validators.map((v) => [v.operator_address, Number(v.commission.commission_rates.rate)]));
-    const rates = mine.map((v) => rate.get(v)).filter((r) => r >= 0);
-    if (rates.length) out.commission = rates.reduce((t, r) => t + r, 0) / rates.length;
-  } catch (err) { /* the estimate is then before commission */ }
-  return out;
 }
 
 // The voting escrow: total voting power across every lock, and how many locks exist.

@@ -70,8 +70,10 @@ export function rankByDepth(pools, opts) {
 // A single-token stake has no pool: its whole mass is the staked amount.
 // With tributes, every Alliance system gets tribute: { items, value, unpriced }, where
 // value covers the tokens that have a price and unpriced counts the ones that do not.
-// With emission, a system with a staked value and a share of the votes gets yield: the
-// LUNA its stakers earn in a year over the value staked (0.5 is 50%). It is an estimate.
+// With emission, a system with a staked value and a share of the votes gets rewardRate
+// (the LUNA its stakers earn in a year over the value staked; 0.5 is 50%), take (the share
+// of the stake the Alliance takes each year) and yield (rewardRate less take, which is how
+// the Eris Liquidity Hub states its APR, bar swap fees). All are estimates.
 export function buildSystems(pools, live = {}, opts = {}) {
   const prices = priceByKey(
     pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
@@ -126,7 +128,8 @@ export function buildSystems(pools, live = {}, opts = {}) {
   for (const s of systems) {
     const perYear = emission[s.sector];
     s.take = ((opts.stakes || {})[s.id] || {}).take ?? null;
-    s.yield = !s.outer && perYear > 0 && s.staked > 0 && s.fleet >= 0 ? (perYear * s.fleet * (lunaUsd || 1)) / s.staked : null;
+    s.rewardRate = !s.outer && perYear > 0 && s.staked > 0 && s.fleet >= 0 ? (perYear * s.fleet * (lunaUsd || 1)) / s.staked : null;
+    s.yield = s.rewardRate == null ? null : s.rewardRate - (s.take || 0);
   }
 
   // Size by live mass. A power curve keeps a $20K pool visibly smaller than a $1M pool
@@ -165,14 +168,18 @@ export function stakesFor(pools, staked = {}, supply = {}) {
 // w times the native stake, so it earns w / (1 + sum of all weights) of what the chain
 // mints for stakers. Each gauge's connector owns one such token: factory/<connector>/vt.
 //   alliances: [{ denom, weight, staked }]   annualProvisions: LUNA minted per year
-//   connectors: { gauge: connectorAddress }  commission: validators' mean cut, or null
-export function gaugeEmission({ alliances = [], annualProvisions = 0, connectors = {}, commission = null } = {}) {
+//   connectors: { gauge: connectorAddress }
+// Checked against the Eris Liquidity Hub on 2026-10-07: its yearly reward figure for six
+// pools in two gauges matched this to the dollar ratio (each pool's vote share of its
+// gauge, and the Stable gauge earning exactly twice the Project gauge). Validator
+// commission is not deducted, which is what makes the level agree with Eris.
+export function gaugeEmission({ alliances = [], annualProvisions = 0, connectors = {} } = {}) {
   const earning = alliances.filter((a) => a.weight > 0 && a.staked !== false);
   const total = 1 + earning.reduce((t, a) => t + a.weight, 0);
   const out = {};
   for (const [gauge, addr] of Object.entries(connectors)) {
     const a = earning.find((x) => x.denom === `factory/${addr}/vt`);
-    if (a && annualProvisions > 0) out[gauge] = annualProvisions * (a.weight / total) * (1 - (commission || 0));
+    if (a && annualProvisions > 0) out[gauge] = annualProvisions * (a.weight / total);
   }
   return out;
 }
