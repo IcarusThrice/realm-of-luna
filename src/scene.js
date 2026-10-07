@@ -53,6 +53,11 @@ function planetCanvas(img, fallback) {
   sctx.drawImage(img, 0, 0, n, n);
   const px = sctx.getImageData(0, 0, n, n).data;
   const ground = planetColour(px, n, fallback);
+  // A near-black planet would vanish against space, so lift the whole surface a little
+  // (a "screen" blend: black becomes deep slate, white and bright colours barely move).
+  const dark = (0.2126 * ground[0] + 0.7152 * ground[1] + 0.0722 * ground[2]) / 255 < 0.1;
+  const LIFT = [30, 34, 50];
+  const lift = (c, k) => 255 - (255 - c) * (255 - k) / 255;
 
   const out = document.createElement('canvas');
   out.width = TEX_W; out.height = TEX_H;
@@ -91,6 +96,7 @@ function planetCanvas(img, fallback) {
         r += (px[o] - r) * a; g += (px[o + 1] - g) * a; b += (px[o + 2] - b) * a;
         break;
       }
+      if (dark) { r = lift(r, LIFT[0]); g = lift(g, LIFT[1]); b = lift(b, LIFT[2]); }
       const o = (y * TEX_W + x) * 4;
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }

@@ -1,5 +1,6 @@
 // Token logos. The files in assets/tokens/ are the projects' own marks, taken from the
-// Cosmos chain registry (github.com/cosmos/chain-registry) and resized to 256 px.
+// Cosmos chain registry (github.com/cosmos/chain-registry) and resized to 256 px, except
+// DEEPSTATE, which its own team supplied.
 // To restyle a token, replace its file; to add one, add the file and a line here.
 import { KNOWN_ASSETS } from './config.js';
 
@@ -12,7 +13,7 @@ const FILE_BY_SYMBOL = {
   ATOM: 'atom', dATOM: 'datom', stATOM: 'statom', INJ: 'inj', PAXG: 'paxg', 'wBTC.atom': 'wbtc', 'wBTC.axl': 'wbtc',
   wstETH: 'wsteth', 'wETH.axl': 'weth',
   ASTRO: 'astro', 'ASTRO.cw20': 'astro-cw20', xASTRO: 'xastro', CAPA: 'capa', ampCAPA: 'ampcapa', FUEL: 'fuel',
-  ROAR: 'roar', ampROAR: 'amproar', VKR: 'vkr',
+  ROAR: 'roar', ampROAR: 'amproar', VKR: 'vkr', DEEPSTATE: 'deepstate',
 };
 
 // Contract and factory tokens, by address or denom (from the registry's terra2 list and
@@ -30,6 +31,7 @@ const SYMBOL_BY_KEY = {
   terra1lxx40s29qvkrcj8fsa3yzyehy7w50umdvvnls2r830rys6lu2zns63eelv: 'ROAR',
   'factory/terra1vklefn7n6cchn0u962w3gaszr4vf52wjvd4y95t2sydwpmpdtszsqvk9wy/ampROAR': 'ampROAR',
   terra1gy73st560m2j0esw5c5rjmr899hvtv4rhh4seeajt3clfhr4aupszjss4j: 'VKR',
+  terra13lc4xzfmzfgds5zux5pp3zuqf665akrdzwlumnjykrt850n96lvsz5y0wg: 'DEEPSTATE', // logo supplied by the Deep State Luna team
 };
 
 // The logo for one token, or null.
