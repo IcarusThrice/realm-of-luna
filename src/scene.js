@@ -108,7 +108,7 @@ function planetCanvas(img, fallback) {
   return out;
 }
 
-export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor, logosFor, onSelect }) {
+export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor, logosFor, onSelect, onPick }) {
   const THREE = window.THREE;
   if (!THREE) return null;
   let renderer;
@@ -264,7 +264,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   scene.add(selRing);
 
   let group = null, lanes = null, lanesOn = true;
-  let systems = [], spinners = [], bodies = [], tagEls = {}, selected = null;
+  let systems = [], spinners = [], bodies = [], pickable = [], tagEls = {}, selected = null;
 
   // One surface per logo and ground colour, shared by every planet of that token and kept
   // for the life of the page. Each resolves to a texture, or null if the logo cannot load.
@@ -298,7 +298,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       scene.remove(group);
     }
     Object.values(tagEls).forEach((el) => el.remove());
-    tagEls = {}; spinners = []; bodies = [];
+    tagEls = {}; spinners = []; bodies = []; pickable = [];
   }
 
   function setSystems(list) {
@@ -341,13 +341,15 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       // A ghost is a system the chart knows of but cannot read yet: drawn hollow.
       // A solid body wears its token's logo when there is one; the colour shows until it loads.
       const logos = !s.ghost && logosFor ? logosFor(s) : [];
-      const body = (r, sym, logo) => {
+      const body = (r, sym, logo, index) => {
         const c = tokens[sym] || unknownColor;
         const mat = s.ghost
           ? new THREE.MeshBasicMaterial({ color: c, wireframe: true, transparent: true, opacity: 0.45 })
           : new THREE.MeshStandardMaterial({ color: c, roughness: 0.58, metalness: 0.05, emissive: c, emissiveIntensity: s.outer ? 0.1 : 0.16 });
         const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, s.ghost ? 12 : 40, s.ghost ? 8 : 28), mat);
         if (!s.ghost) atmosphere(mesh, r, c, s.outer ? 0.7 : 1);
+        mesh.userData.pick = { id: s.id, index };
+        pickable.push(mesh);
         if (logo) {
           surface(logo, c).then((tex) => {
             if (!tex || !mesh.parent) return; // logo missing, or the chart was redrawn meanwhile
@@ -361,11 +363,11 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
         }
         return mesh;
       };
-      const A = body(ra, s.a, logos[0]);
+      const A = body(ra, s.a, logos[0], 0);
       A.position.x = -da;
       spin.add(A);
       if (!single) {
-        const B = body(rb, s.b, logos[1]);
+        const B = body(rb, s.b, logos[1], 1);
         B.position.x = db;
         spin.add(B);
       }
@@ -443,13 +445,30 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   const reset = () => { view.az = HOME.az; view.pol = homePol(); view.auto = true; view.tilted = false; view.dist = fitDist(); };
   const ptrs = {};
   let pinch = 0;
+  // Clicking a planet picks it. A press that moves is a drag, not a click.
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  const planetAt = (e) => {
+    const box = canvas.getBoundingClientRect();
+    ndc.set(((e.clientX - box.left) / box.width) * 2 - 1, -((e.clientY - box.top) / box.height) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObjects([moon, ...pickable], false)[0];
+    return hit ? (hit.object === moon ? { moon: true } : hit.object.userData.pick) : null;
+  };
+  let press = null, hoverDue = null;
   canvas.addEventListener('pointerdown', (e) => {
+    press = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
     ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
   });
   canvas.addEventListener('pointermove', (e) => {
     const p = ptrs[e.pointerId];
-    if (!p) return;
+    if (!p) {
+      // Not dragging: show a pointing hand over anything that can be picked.
+      if (e.pointerType === 'mouse' && !hoverDue) {
+        hoverDue = requestAnimationFrame(() => { hoverDue = null; canvas.style.cursor = planetAt(e) ? 'pointer' : ''; });
+      }
+      return;
+    }
     const ids = Object.keys(ptrs);
     if (ids.length === 1) {
       view.tilted = true;
@@ -465,7 +484,14 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     }
   });
   const drop = (e) => { delete ptrs[e.pointerId]; pinch = 0; };
-  canvas.addEventListener('pointerup', drop);
+  canvas.addEventListener('pointerup', (e) => {
+    const clicked = press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 6 && performance.now() - press.t < 600;
+    press = null;
+    drop(e);
+    if (!clicked || !onPick) return;
+    const hit = planetAt(e);
+    if (hit) onPick(hit);
+  });
   canvas.addEventListener('pointercancel', drop);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
 

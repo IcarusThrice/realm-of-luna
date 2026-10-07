@@ -142,3 +142,16 @@ button, a { font: inherit; color: inherit; }
   .dock.br { right: 10px; bottom: 10px; gap: 6px; }
 }
 .pair img.dot { width: 22px; height: 22px; object-fit: cover; }
+
+/* The token view: one planet's facts, in place of the pool's. */
+.contents { display: contents; }
+.token { display: flex; flex-direction: column; gap: 22px; }
+.tlogo { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; vertical-align: -6px; margin-right: 12px; }
+.pair button { display: inline-flex; align-items: center; gap: 7px; padding: 4px 8px 4px 4px; margin: -4px 0; background: none; border: 1px solid transparent; border-radius: 2px; cursor: pointer; font: inherit; }
+.pair button:hover { border-color: var(--line); }
+.addr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.addr code { flex: 1 1 100%; font-family: var(--data); font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
+.addr button, .back { min-height: 40px; padding: 0 12px; background: none; border: 1px solid var(--line); border-radius: 2px; cursor: pointer; font-family: var(--data); font-size: 12px; }
+.addr button:hover, .back:hover { border-color: var(--dim); }
+.addr a { font-family: var(--data); font-size: 12px; color: var(--brass); }
+.back { align-self: flex-start; border-color: var(--brass); color: var(--brass); }

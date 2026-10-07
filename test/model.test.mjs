@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceByKey, rankByDepth, buildSystems, mergeAlliance, stakesFor, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
+import { priceByKey, rankByDepth, buildSystems, mergeAlliance, stakesFor, tokenIndex, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
 import { smartPath, encodeSmartQuery, decodeSmartResponse } from '../src/chain.js';
 import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
 import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
@@ -310,4 +310,37 @@ test('the yield formula reproduces the Eris Liquidity Hub figures of 2026-10-07'
   const prices = eris.map(([gauge, fleet, usd]) => usd / (e[gauge] * fleet));
   for (const p of prices) assert.ok(Math.abs(p / prices[0] - 1) < 0.001, 'one price fits all six pools');
   assert.ok(prices[0] > 0.045 && prices[0] < 0.05);
+});
+
+test('tokens are gathered across every system that holds them', () => {
+  const pools = [
+    { id: 'x', a: 'LUNA', b: 'FOO', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1' },
+    { id: 'y', a: 'LUNA', b: 'BAR', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p2' },
+    { id: 'o', a: 'FOO', b: 'ZED', outer: true, kind: 'pair', type: 'stable', pair: 'p3' },
+    { id: 'u', a: 'LUNA', b: 'NOPE', sector: 'stable', kind: 'pair', pair: 'p4' },
+    { id: 's', a: 'FOO', b: null, sector: 'single', kind: 'single', pair: null, asset: 'key-FOO' },
+  ];
+  const live = { x: pool('LUNA', 100, 'FOO', 50), y: pool('LUNA', 10, 'BAR', 5), o: [asset('FOO', 4), asset('ZED', 9, 'key-ZED')] };
+  const stakes = stakesFor(pools, { 'key-FOO': { raw: 3e6, key: 'key-FOO', amount: 3 } }, {});
+  const systems = buildSystems(pools, live, { stakes, lunaUsd: 0.5 });
+  const x = systems.find((s) => s.id === 'x');
+  assert.deepEqual(x.parts, [
+    { key: 'uluna', symbol: 'LUNA', amount: 100, price: 0.5, value: 50 },
+    { key: 'key-FOO', symbol: 'FOO', amount: 50, price: 1, value: 50 },
+  ]);
+  const t = tokenIndex(systems);
+  assert.deepEqual(Object.keys(t).sort(), ['key-BAR', 'key-FOO', 'key-ZED', 'uluna']);
+  assert.deepEqual([t.uluna.amount, t.uluna.value, t.uluna.price, t.uluna.unit], [110, 55, 0.5, 'USD']);
+  assert.deepEqual(t.uluna.systems.map((s) => s.id), ['x', 'y'], 'deepest first; an unread system holds nothing');
+  assert.deepEqual([t['key-FOO'].amount, t['key-FOO'].value], [57, 57], 'two pools and a single stake');
+  assert.deepEqual(t['key-FOO'].systems.map((s) => [s.id, s.outer]), [['x', false], ['o', true], ['s', false]]);
+});
+
+test('token descriptions go by key, never by the name a token gives itself', async () => {
+  const { tokenAbout, tokenKind } = await import('../src/tokens.js');
+  assert.match(tokenAbout('uluna'), /native coin/);
+  assert.match(tokenAbout(USDC_INJ), /Injective/);
+  assert.match(tokenAbout('terra13lc4xzfmzfgds5zux5pp3zuqf665akrdzwlumnjykrt850n96lvsz5y0wg'), /Deep State Luna/);
+  assert.equal(tokenAbout('terra1fake'), '');
+  assert.deepEqual(['uluna', 'ibc/AB', 'factory/terra1x/y', 'terra1abc'].map(tokenKind), ['Native coin of Terra', 'Arrived from another chain over IBC', 'Issued on Terra by a contract', 'Contract token on Terra']);
 });

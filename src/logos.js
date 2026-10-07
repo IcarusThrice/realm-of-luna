@@ -34,6 +34,9 @@ const SYMBOL_BY_KEY = {
   terra13lc4xzfmzfgds5zux5pp3zuqf665akrdzwlumnjykrt850n96lvsz5y0wg: 'DEEPSTATE', // logo supplied by the Deep State Luna team
 };
 
+// The symbol this project gives a contract or factory token, or undefined.
+export const symbolForKey = (key) => SYMBOL_BY_KEY[key];
+
 // The logo for one token, or null.
 // A token read from the chain is matched by its key alone: anyone can mint a token and
 // call it "LUNA", so a symbol from the chain proves nothing. The symbol is used only when

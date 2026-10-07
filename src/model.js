@@ -64,7 +64,8 @@ export function rankByDepth(pools, opts) {
 //   opts.tributes          { 'gauge assetKey': [{ key, symbol, amount }] }: voter incentives
 //   opts.emission          from gaugeEmission(): LUNA each gauge earns per year
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
-// amounts, keys (the token keys behind a and b, once read from the chain), shareA (first
+// amounts, keys (the token keys behind a and b, once read from the chain), parts (per
+// token: key, symbol, amount, and price and value in `unit` when priced), shareA (first
 // token's share of the value), size and tier. With stakes it also
 // gets stakedShare (part of the pool that is staked) and staked (that part's value).
 // A single-token stake has no pool: its whole mass is the staked amount.
@@ -89,14 +90,21 @@ export function buildSystems(pools, live = {}, opts = {}) {
     return { items, value: priced.reduce((t, x) => t + x.amount * prices[x.key], 0) * (lunaUsd || 1), unpriced: items.length - priced.length };
   };
 
+  const scale = lunaUsd || 1;
+  const part = (key, symbol, amount) => {
+    const priced = prices[key] > 0;
+    return { key, symbol, amount, price: priced ? prices[key] * scale : null, value: priced ? amount * prices[key] * scale : null };
+  };
+
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, keys: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, keys: null, parts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
     const stake = (opts.stakes || {})[p.id];
     if (p.kind === 'single') {
       if (p.asset) s.keys = [p.asset]; // a single stake's asset is the token itself
       if (!stake || !(stake.amount >= 0)) return s;
       s.amounts = [{ symbol: p.a, amount: stake.amount }];
+      s.parts = [part(stake.key, p.a, stake.amount)];
       const price = prices[stake.key];
       if (!(price > 0) || !(stake.amount > 0)) return s;
       s.live = true;
@@ -114,6 +122,7 @@ export function buildSystems(pools, live = {}, opts = {}) {
     const second = assets.find((x) => x !== first);
     s.a = first.symbol; s.b = second.symbol;
     s.keys = [first.key, second.key];
+    s.parts = [part(first.key, first.symbol, first.amount), part(second.key, second.symbol, second.amount)];
     s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
     const { vals, depth } = poolDepth([first, second], prices);
     if (!(depth > 0)) return s;
@@ -141,6 +150,24 @@ export function buildSystems(pools, live = {}, opts = {}) {
     s.tier = !s.live ? 'Uncharted' : s.size >= 0.87 ? 'Stronghold' : s.size >= 0.6 ? 'Colony' : 'Outpost';
   }
   return systems;
+}
+
+// Every token on the chart, gathered across the systems that hold it.
+// Returns { key: { key, symbol, price, unit, amount, value, systems: [{ id, name, amount, value, outer }] } }:
+// amount and value are totals across read systems, and systems are deepest first.
+export function tokenIndex(systems) {
+  const out = {};
+  for (const s of systems) {
+    for (const p of s.parts || []) {
+      const t = out[p.key] || (out[p.key] = { key: p.key, symbol: p.symbol, price: null, unit: s.unit, amount: 0, value: 0, systems: [] });
+      if (p.price != null) t.price = p.price;
+      t.amount += p.amount;
+      if (p.value != null) t.value += p.value;
+      t.systems.push({ id: s.id, name: pairName(s), amount: p.amount, value: p.value, outer: s.outer });
+    }
+  }
+  for (const t of Object.values(out)) t.systems.sort((x, y) => (y.value || 0) - (x.value || 0) || y.amount - x.amount);
+  return out;
 }
 
 // Turn raw staking-contract balances into what buildSystems needs.

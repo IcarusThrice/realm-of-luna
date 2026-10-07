@@ -282,6 +282,35 @@ export async function loadEmission() {
   }
 }
 
+// Facts about one token, read on demand and remembered for the visit.
+// Returns { supply, bonded? }: supply is how much of the token exists on Terra, in whole
+// tokens (for a token that arrived over IBC, how much has been brought to Terra); bonded,
+// for LUNA only, is how much is staked with validators. A figure that cannot be read is null.
+const tokenFacts = new Map();
+export function loadTokenFacts(key) {
+  if (!tokenFacts.has(key)) {
+    tokenFacts.set(key, (async () => {
+      const out = { supply: null };
+      try {
+        if (key.startsWith('terra1')) {
+          const t = await smart(key, { token_info: {} });
+          out.supply = Number(t.total_supply) / 10 ** t.decimals;
+        } else {
+          const meta = await resolveAsset({ native_token: { denom: key } });
+          const s = await lcdGet('/cosmos/bank/v1beta1/supply/by_denom?denom=' + encodeURIComponent(key));
+          if (!meta.unresolved) out.supply = Number(s.amount.amount) / 10 ** meta.decimals;
+        }
+      } catch (err) { /* leave it unread */ }
+      if (key === 'uluna') {
+        try { out.bonded = Number((await lcdGet('/cosmos/staking/v1beta1/pool')).pool.bonded_tokens) / 1e6; } catch (err) { out.bonded = null; }
+      }
+      if (out.supply == null) tokenFacts.delete(key); // try again on the next click
+      return out;
+    })());
+  }
+  return tokenFacts.get(key);
+}
+
 // The voting escrow: total voting power across every lock, and how many locks exist.
 // Returns { votes, locks }, or null if it cannot be read.
 export async function loadEscrow() {

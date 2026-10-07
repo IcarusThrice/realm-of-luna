@@ -1,10 +1,11 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
 import { ERIS_LIQUIDITY_HUB, ERIS_CONNECTORS, PEGS, USDC_INJ } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
-import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, lunaUsd, knownRates } from './chain.js';
-import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
+import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, loadTokenFacts, lunaUsd, knownRates } from './chain.js';
+import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, tokenIndex, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
-import { logosFor } from './logos.js';
+import { logosFor, logoFor } from './logos.js';
+import { tokenKind, tokenAbout } from './tokens.js';
 
 const $ = (id) => document.getElementById(id);
 const POOL_TYPES = { xyk: 'constant-product pool', concentrated: 'concentrated pool', stable: 'stable pool' };
@@ -13,6 +14,8 @@ let systems = [];
 let selected = POOLS[0].id;
 let listEls = {};
 let period = null;
+let tokens = {};          // every token on the chart, by key
+let shownToken = null;    // key of the token in the panel, or null when a pool is shown
 let yieldRead = false; // true once the chain's reward figures are read
 const percent = (x) => (x >= 10 ? 'over 1,000%' : (x < 0 ? '\u2212' : '') + (Math.abs(x) * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + '%');
 
@@ -25,6 +28,7 @@ const chart = createChart({
   unknownColor: UNKNOWN_TOKEN,
   logosFor,
   onSelect: select,
+  onPick: pick,
 });
 if (!chart) {
   $('nogl').hidden = false;
@@ -43,10 +47,97 @@ function about(s) {
   return `${where} in the ${SECTORS[s.sector].gauge} gauge.${unread}`;
 }
 
+// A planet was clicked. Select its system, and show the token if the chain has told us
+// which token it is. The Moon stands for LUNA.
+function pick(hit) {
+  if (hit.moon) { showToken('uluna'); return; }
+  const s = systems.find((x) => x.id === hit.id);
+  if (!s) return;
+  select(s.id);
+  const key = s.keys && s.keys[hit.index];
+  if (key) showToken(key);
+}
+
+const money = (v, unit) => (v == null ? '' : unit === 'USD' ? '$' + (v >= 1000 ? formatAmount(v) : v >= 1 ? v.toFixed(2) : v.toPrecision(3)) : formatAmount(v) + ' ' + unit);
+
+function showToken(key) {
+  const t = tokens[key];
+  if (!t && key !== 'uluna') return;
+  shownToken = key;
+  $('view-token').hidden = false;
+  $('view-system').hidden = true;
+  const symbol = t ? t.symbol : 'LUNA';
+  const logo = logoFor(key, symbol);
+  $('t-kind').textContent = tokenKind(key);
+  $('t-name').textContent = symbol;
+  $('t-logo').hidden = !logo;
+  if (logo) $('t-logo').src = logo;
+  $('t-about').textContent = tokenAbout(key) || 'This chart has no description for this token. It is shown under the name its own contract reports.';
+
+  const priced = t && t.price != null;
+  $('t-price').textContent = priced ? money(t.price, t.unit) : 'Not priced';
+  $('t-price').classList.toggle('live', priced);
+  $('t-price-note').textContent = priced ? (t.unit === 'USD' ? 'From pool reserves on Terra, taking one USDC.inj as one dollar' : 'From pool reserves on Terra, in LUNA') : 'No pool on this chart gives it a price';
+
+  const held = t ? `${formatAmount(t.amount)} ${symbol}` : '';
+  $('t-held').textContent = !t ? 'Not read yet' : priced ? formatMass(t.value, t.unit) : held;
+  $('t-held').classList.toggle('live', !!t);
+  $('t-held-note').textContent = t ? `${held} across ${t.systems.length} ${t.systems.length === 1 ? 'system' : 'systems'} on this chart` : 'Held across the systems on this chart';
+
+  const row = $('t-systems');
+  row.textContent = '';
+  for (const sys of t ? t.systems : []) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = sys.name + (sys.value != null ? ' \u00b7 ' + formatMass(sys.value, t.unit) : '');
+    if (sys.outer) b.className = 'ghost';
+    b.addEventListener('click', () => select(sys.id));
+    row.appendChild(b);
+  }
+
+  $('t-key').textContent = key;
+  $('t-copy').textContent = key.startsWith('terra1') ? 'Copy address' : 'Copy denom';
+  $('t-explore').hidden = !key.startsWith('terra1');
+  if (key.startsWith('terra1')) $('t-explore').href = 'https://chainsco.pe/terra2/address/' + key;
+  const cur = systems.find((x) => x.id === selected);
+  $('t-back').textContent = cur ? `Back to ${pairName(cur)}` : 'Back to the pool';
+
+  // Supply is read from the chain when the token is opened.
+  $('t-supply').textContent = 'Reading\u2026';
+  $('t-supply').classList.remove('live');
+  $('t-supply-note').textContent = key.startsWith('ibc/') ? 'How much has been brought to Terra' : 'How much of it exists on this chain';
+  $('t-bonded-row').hidden = key !== 'uluna';
+  if (key === 'uluna') { $('t-bonded').textContent = 'Reading\u2026'; $('t-bonded').classList.remove('live'); }
+  loadTokenFacts(key).then((f) => {
+    if (shownToken !== key) return; // another token was opened meanwhile
+    const has = f.supply > 0;
+    $('t-supply').textContent = has ? `${formatAmount(f.supply)} ${symbol}` : 'Could not be read';
+    $('t-supply').classList.toggle('live', has);
+    if (has) {
+      const worth = priced ? `Worth ${formatMass(f.supply * t.price, t.unit)} at this price. ` : '';
+      const share = t && t.amount > 0 ? `${percent(t.amount / f.supply)} of it sits in these pools.` : '';
+      $('t-supply-note').textContent = (key.startsWith('ibc/') ? 'Brought to Terra from another chain. ' : 'Live from the chain. ') + worth + share;
+    }
+    if (key === 'uluna') {
+      const ok = f.bonded > 0 && has;
+      $('t-bonded').textContent = ok ? `${formatAmount(f.bonded)} LUNA` : 'Could not be read';
+      $('t-bonded').classList.toggle('live', ok);
+      $('t-bonded-note').textContent = ok ? `${percent(f.bonded / f.supply)} of all LUNA is bonded with validators, live from the chain` : 'Bonded with validators';
+    }
+  });
+}
+
+function hideToken() {
+  shownToken = null;
+  $('view-token').hidden = true;
+  $('view-system').hidden = false;
+}
+
 function select(id) {
   const s = systems.find((x) => x.id === id) || systems[0];
   if (!s) return;
   selected = s.id;
+  hideToken();
   $('p-eyebrow').textContent = `${s.outer ? 'The Interchain Deep' : SECTORS[s.sector].name} · ${s.tier}`;
   $('p-name').textContent = pairName(s);
 
@@ -55,7 +146,10 @@ function select(id) {
   const logos = logosFor(s);
   for (const [i, sym] of [s.a, s.b].entries()) {
     if (!sym) continue;
-    const span = document.createElement('span');
+    // A token the chain has identified can be opened; one known only by name cannot.
+    const key = s.keys && s.keys[i];
+    const span = document.createElement(key ? 'button' : 'span');
+    if (key) { span.type = 'button'; span.title = `About ${sym}`; span.addEventListener('click', () => showToken(key)); }
     const dot = document.createElement(logos[i] ? 'img' : 'i');
     dot.className = 'dot';
     if (logos[i]) { dot.src = logos[i]; dot.alt = ''; } else dot.style.background = TOKENS[sym] || UNKNOWN_TOKEN;
@@ -107,6 +201,8 @@ function select(id) {
 
 function render(next) {
   systems = layout(next, SECTORS);
+  tokens = tokenIndex(systems);
+  const keep = shownToken;
 
   // The list mirrors the chart: one group per gauge, then everything outside the Alliance.
   const list = $('list');
@@ -136,6 +232,7 @@ function render(next) {
   }
   if (chart) chart.setSystems(systems);
   select(selected);
+  if (keep && (tokens[keep] || keep === 'uluna')) showToken(keep); // stay on the token through a data refresh
 
   const sum = (xs) => xs.reduce((t, s) => t + s.value, 0);
   const inside = systems.filter((s) => s.live && !s.outer);
@@ -155,6 +252,12 @@ function tick() {
 }
 
 for (const a of document.querySelectorAll('[data-eris]')) a.href = ERIS_LIQUIDITY_HUB;
+$('t-back').addEventListener('click', hideToken);
+$('t-copy').addEventListener('click', async () => {
+  const label = $('t-copy').textContent;
+  try { await navigator.clipboard.writeText($('t-key').textContent); $('t-copy').textContent = 'Copied'; } catch (err) { $('t-copy').textContent = 'Select the text above to copy'; }
+  setTimeout(() => { $('t-copy').textContent = label; }, 1600);
+});
 $('zin').addEventListener('click', () => chart && chart.zoom(0.85));
 $('zout').addEventListener('click', () => chart && chart.zoom(1.18));
 $('reset').addEventListener('click', () => chart && chart.reset());

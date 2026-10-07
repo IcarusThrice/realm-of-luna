@@ -17,6 +17,7 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Hollow systems | Single-token stakes whose token has no price path through the pools the chart reads, and anything that could not be read |
 | Small screens | On a phone the chart frames the plate and looks down more steeply; the outer orbit runs off the sides and comes round as the chart is turned. Labels that would be cut off by the edge or sit under a control are hidden |
 | The look of space | Drawn in code, with no image files: a galactic band with dust lanes and faint gas clouds, a few thousand twinkling stars, a cratered Moon that turns slowly, a glow around each planet's edge, and a belt of dust between the plate and the outer orbit (`src/space.js`). Motion stops when the visitor's system asks for reduced motion |
+| Token view | Click a planet (or a token in the panel) to see that token: what it is, its price from pool reserves, how much of it exists on Terra (read from the chain when opened; for LUNA also how much is staked), how much sits in the chart's pools, and every system it orbits in. The Moon opens LUNA. Descriptions are in `src/tokens.js`; figures are never stored |
 | Token logos | Each planet wears its token's logo, projected onto the sphere from three sides so it reads face-on as the planet turns. Logos are matched by token address, never by name. Tokens without a file keep a plain colour |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
 | Tribute (voter incentives) | Read live from the Eris bribe manager: the tokens on offer for each asset, valued with the same on-chain prices. Tokens with no price path are listed by amount |
@@ -52,6 +53,7 @@ Open `/discover` on the deployed site (or run `npm run discover`). It lists ever
 - `src/model.js`: pricing, sizing and placement, with tests in `test/`
 - `src/scene.js`: the three.js chart
 - `src/space.js`: the sky, stars, Moon surface and planet glow
+- `src/tokens.js`: a one-line description of each token
 - `src/logos.js`, `assets/tokens/`: which logo belongs to which token, and the files
 - `scripts/discover.mjs`: lists Astroport pairs
 
