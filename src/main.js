@@ -4,6 +4,7 @@ import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.
 import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, lunaUsd, knownRates } from './chain.js';
 import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
+import { logosFor } from './logos.js';
 
 const $ = (id) => document.getElementById(id);
 const POOL_TYPES = { xyk: 'constant-product pool', concentrated: 'concentrated pool', stable: 'stable pool' };
@@ -22,6 +23,7 @@ const chart = createChart({
   sectors: SECTORS,
   tokens: TOKENS,
   unknownColor: UNKNOWN_TOKEN,
+  logosFor,
   onSelect: select,
 });
 if (!chart) {
@@ -50,11 +52,13 @@ function select(id) {
 
   const pair = $('p-pair');
   pair.textContent = '';
-  for (const sym of [s.a, s.b].filter(Boolean)) {
+  const logos = logosFor(s);
+  for (const [i, sym] of [s.a, s.b].entries()) {
+    if (!sym) continue;
     const span = document.createElement('span');
-    const dot = document.createElement('i');
+    const dot = document.createElement(logos[i] ? 'img' : 'i');
     dot.className = 'dot';
-    dot.style.background = TOKENS[sym] || UNKNOWN_TOKEN;
+    if (logos[i]) { dot.src = logos[i]; dot.alt = ''; } else dot.style.background = TOKENS[sym] || UNKNOWN_TOKEN;
     span.appendChild(dot);
     span.appendChild(document.createTextNode(sym));
     pair.appendChild(span);

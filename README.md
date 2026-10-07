@@ -15,6 +15,7 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA and arbLUNA use the exchange rate their Eris contracts report. One USDC.inj is taken as one dollar |
 | Settled (staked amounts) | Read live from the four Eris asset-staking contracts. For a pool it is the staked LP as a share of the LP in issue; a single-token stake is sized by its staked amount |
 | Hollow systems | Single-token stakes whose token has no price path through the pools the chart reads, and anything that could not be read |
+| Token logos | Each planet wears its token's logo, projected onto the sphere from three sides so it reads face-on as the planet turns. Logos are matched by token address, never by name. Tokens without a file keep a plain colour |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
 | Tribute (voter incentives) | Read live from the Eris bribe manager: the tokens on offer for each asset, valued with the same on-chain prices. Tokens with no price path are listed by amount |
 | Voting power | Total votes and number of locks, read live from the voting escrow and shown at the Moon Court |
@@ -48,8 +49,13 @@ Open `/discover` on the deployed site (or run `npm run discover`). It lists ever
 - `src/chain.js`: read-only chain queries (browser and Node)
 - `src/model.js`: pricing, sizing and placement, with tests in `test/`
 - `src/scene.js`: the three.js chart
+- `src/logos.js`, `assets/tokens/`: which logo belongs to which token, and the files
 - `scripts/discover.mjs`: lists Astroport pairs
 
 ```
 npm test
 ```
+
+## Logos
+
+The files in `assets/tokens/` are each project's own mark, taken from the [Cosmos chain registry](https://github.com/cosmos/chain-registry) and resized to 256 px. They remain the property of their projects and are used here only to identify the tokens. To change how a token looks, replace its file. To add one, add a 256 px square PNG and a line in `src/logos.js`.

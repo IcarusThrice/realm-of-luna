@@ -278,3 +278,22 @@ test('yield is the gauge\'s LUNA times the vote share over the staked value', ()
   const usd = buildSystems(pools, live, { stakes, emission: { stable: 80 }, lunaUsd: 0.05 }).find((s) => s.id === 'x');
   assert.ok(Math.abs(usd.yield - 0.2) < 1e-12);
 });
+
+test('logos are matched by token key, and by name only for this project\'s own list', async () => {
+  const { logoFor, logosFor, LOGO_FILES } = await import('../src/logos.js');
+  const { existsSync } = await import('node:fs');
+  for (const f of LOGO_FILES) assert.ok(existsSync(new URL('../' + f, import.meta.url)), f + ' exists');
+  assert.equal(logoFor('uluna', 'anything'), 'assets/tokens/luna.png');
+  assert.equal(logoFor(USDC_INJ, 'USDC'), 'assets/tokens/usdc.png');
+  assert.equal(logoFor('terra1ecgazyd0waaj3g7l9cmy5gulhxkps2gmxu9ghducvuypjq68mq2s5lvsct', 'x'), 'assets/tokens/ampluna.png');
+  assert.equal(logoFor('terra1fake', 'LUNA'), null, 'a look-alike token gets no logo');
+  assert.equal(logoFor(null, 'LUNA'), 'assets/tokens/luna.png');
+  assert.equal(logoFor(null, 'Pool abcde'), null);
+  // A read pool carries keys; an unread curated one falls back to its names.
+  const [x] = buildSystems([{ id: 'x', a: 'LUNA', b: 'FAKE', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p1' }], { x: [asset('LUNA', 100), asset('LUNA', 50, 'terra1fake')] });
+  assert.deepEqual(x.keys, ['uluna', 'terra1fake']);
+  assert.deepEqual(logosFor(x), ['assets/tokens/luna.png', null]);
+  assert.deepEqual(logosFor(buildSystems([{ id: 'y', a: 'LUNA', b: 'EURe', sector: 'stable', kind: 'pair', pair: 'p2' }])[0]), ['assets/tokens/luna.png', 'assets/tokens/eure.png']);
+  const single = buildSystems([{ id: 's', a: 'ampCAPA', b: null, sector: 'single', kind: 'single', pair: null, asset: 'factory/terra186rpfczl7l2kugdsqqedegl4es4hp624phfc7ddy8my02a4e8lgq5rlx7y/ampCAPA' }])[0];
+  assert.deepEqual(logosFor(single), ['assets/tokens/ampcapa.png', null]);
+});

@@ -64,7 +64,8 @@ export function rankByDepth(pools, opts) {
 //   opts.tributes          { 'gauge assetKey': [{ key, symbol, amount }] }: voter incentives
 //   opts.emission          from gaugeEmission(): LUNA each gauge earns per year
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
-// amounts, shareA (first token's share of the value), size and tier. With stakes it also
+// amounts, keys (the token keys behind a and b, once read from the chain), shareA (first
+// token's share of the value), size and tier. With stakes it also
 // gets stakedShare (part of the pool that is staked) and staked (that part's value).
 // A single-token stake has no pool: its whole mass is the staked amount.
 // With tributes, every Alliance system gets tribute: { items, value, unpriced }, where
@@ -88,9 +89,10 @@ export function buildSystems(pools, live = {}, opts = {}) {
 
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, keys: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
     const stake = (opts.stakes || {})[p.id];
     if (p.kind === 'single') {
+      if (p.asset) s.keys = [p.asset]; // a single stake's asset is the token itself
       if (!stake || !(stake.amount >= 0)) return s;
       s.amounts = [{ symbol: p.a, amount: stake.amount }];
       const price = prices[stake.key];
@@ -109,6 +111,7 @@ export function buildSystems(pools, live = {}, opts = {}) {
     const first = assets.find((x) => x.symbol === p.a) || (lead(assets[1]) < lead(assets[0]) ? assets[1] : assets[0]);
     const second = assets.find((x) => x !== first);
     s.a = first.symbol; s.b = second.symbol;
+    s.keys = [first.key, second.key];
     s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
     const { vals, depth } = poolDepth([first, second], prices);
     if (!(depth > 0)) return s;

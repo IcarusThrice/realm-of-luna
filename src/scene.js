@@ -10,7 +10,96 @@ const FIT_RADIUS = 25;
 
 const rad = (d) => d * Math.PI / 180;
 
-export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor, onSelect }) {
+// --- Logos on the planets ------------------------------------------------------------------
+// A logo is flat and a planet is not, so wrapping the image around the sphere would pinch
+// it toward the poles. Instead the logo is projected straight onto the surface, the way a
+// slide projector would throw it, from three sides. Seen face-on it is undistorted.
+// The three faces sit a third of a turn apart, tipped up toward the camera's usual height.
+const TEX_W = 512, TEX_H = 256, FACES = 3;
+const FACE_LAT = rad(30);        // how far above the equator each face is centred
+const FACE_SIZE = 0.74;          // logo radius, as a fraction of the planet's; larger and the faces would overlap
+const FACE_LON = Math.PI - HOME.az; // longitude that faces the camera's home position
+
+const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+// What colour should the rest of the planet be? Most logos are round badges with their
+// own background; continue that background over the whole planet. A bare mark on a clear
+// background keeps the token's chart colour, darkened or lightened to set the mark off.
+function planetColour(px, n, fallback) {
+  let r = 0, g = 0, b = 0, hit = 0, total = 0;
+  for (let i = 0; i < 360; i += 2) {
+    for (const f of [0.9, 0.95]) {
+      const x = Math.round(n / 2 + Math.cos(rad(i)) * f * n / 2), y = Math.round(n / 2 + Math.sin(rad(i)) * f * n / 2);
+      const o = (Math.min(n - 1, Math.max(0, y)) * n + Math.min(n - 1, Math.max(0, x))) * 4;
+      total++;
+      if (px[o + 3] > 200) { hit++; r += px[o]; g += px[o + 1]; b += px[o + 2]; }
+    }
+  }
+  if (hit / total > 0.85) return [r / hit, g / hit, b / hit];
+  // A bare mark: find its average colour and pick a ground that contrasts with it.
+  let mr = 0, mg = 0, mb = 0, m = 0;
+  for (let o = 0; o < px.length; o += 16) if (px[o + 3] > 200) { mr += px[o]; mg += px[o + 1]; mb += px[o + 2]; m++; }
+  const lum = m ? (0.2126 * mr + 0.7152 * mg + 0.0722 * mb) / m / 255 : 0.5;
+  const base = hexRgb(fallback);
+  return lum > 0.5 ? base.map((c) => c * 0.22 + 8) : base.map((c) => c * 0.35 + 255 * 0.65);
+}
+
+// Build the planet's surface image: ground colour, with the logo projected on each face.
+function planetCanvas(img, fallback) {
+  const n = 256;
+  const src = document.createElement('canvas');
+  src.width = src.height = n;
+  const sctx = src.getContext('2d');
+  sctx.drawImage(img, 0, 0, n, n);
+  const px = sctx.getImageData(0, 0, n, n).data;
+  const ground = planetColour(px, n, fallback);
+
+  const out = document.createElement('canvas');
+  out.width = TEX_W; out.height = TEX_H;
+  const octx = out.getContext('2d');
+  const image = octx.createImageData(TEX_W, TEX_H);
+  const d = image.data;
+  // Each face: its centre direction, and the "right" and "up" directions across it.
+  const faces = [];
+  for (let k = 0; k < FACES; k++) {
+    const lon = FACE_LON + k * 2 * Math.PI / FACES;
+    const c = [-Math.cos(lon) * Math.cos(FACE_LAT), Math.sin(FACE_LAT), Math.sin(lon) * Math.cos(FACE_LAT)];
+    const dot = c[1];
+    let up = [-dot * c[0], 1 - dot * c[1], -dot * c[2]];
+    const ul = Math.hypot(up[0], up[1], up[2]);
+    up = up.map((v) => v / ul);
+    const right = [up[1] * c[2] - up[2] * c[1], up[2] * c[0] - up[0] * c[2], up[0] * c[1] - up[1] * c[0]];
+    faces.push({ c, up, right });
+  }
+  for (let y = 0; y < TEX_H; y++) {
+    const theta = (y + 0.5) / TEX_H * Math.PI, st = Math.sin(theta), ct = Math.cos(theta);
+    for (let x = 0; x < TEX_W; x++) {
+      const phi = (x + 0.5) / TEX_W * 2 * Math.PI;
+      // The direction this texel points, matching three.js's sphere mapping.
+      const vx = -Math.cos(phi) * st, vy = ct, vz = Math.sin(phi) * st;
+      let r = ground[0], g = ground[1], b = ground[2];
+      for (const f of faces) {
+        if (vx * f.c[0] + vy * f.c[1] + vz * f.c[2] <= 0) continue;
+        const u = (vx * f.right[0] + vy * f.right[1] + vz * f.right[2]) / FACE_SIZE;
+        const v = (vx * f.up[0] + vy * f.up[1] + vz * f.up[2]) / FACE_SIZE;
+        const rr = Math.hypot(u, v);
+        if (rr >= 1) continue;
+        const sx = Math.min(n - 1, Math.max(0, Math.round((0.5 + u / 2) * n - 0.5)));
+        const sy = Math.min(n - 1, Math.max(0, Math.round((0.5 - v / 2) * n - 0.5)));
+        const o = (sy * n + sx) * 4;
+        const a = (px[o + 3] / 255) * Math.min(1, (1 - rr) / 0.03); // soft edge
+        r += (px[o] - r) * a; g += (px[o + 1] - g) * a; b += (px[o + 2] - b) * a;
+        break;
+      }
+      const o = (y * TEX_W + x) * 4;
+      d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+  }
+  octx.putImageData(image, 0, 0);
+  return out;
+}
+
+export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor, logosFor, onSelect }) {
   const THREE = window.THREE;
   if (!THREE) return null;
   let renderer;
@@ -135,7 +224,29 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   scene.add(selRing);
 
   let group = null, lanes = null, lanesOn = true;
-  let systems = [], spinners = [], tagEls = {}, selected = null;
+  let systems = [], spinners = [], bodies = [], tagEls = {}, selected = null;
+
+  // One surface per logo and ground colour, shared by every planet of that token and kept
+  // for the life of the page. Each resolves to a texture, or null if the logo cannot load.
+  const surfaces = new Map();
+  const surface = (url, fallback) => {
+    const id = url + ' ' + fallback;
+    if (!surfaces.has(id)) {
+      surfaces.set(id, new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const tex = new THREE.CanvasTexture(planetCanvas(img, fallback));
+            tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+            resolve(tex);
+          } catch (err) { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      }));
+    }
+    return surfaces.get(id);
+  };
 
   function clearSystems() {
     if (group) {
@@ -146,7 +257,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       scene.remove(group);
     }
     Object.values(tagEls).forEach((el) => el.remove());
-    tagEls = {}; spinners = [];
+    tagEls = {}; spinners = []; bodies = [];
   }
 
   function setSystems(list) {
@@ -187,18 +298,32 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       const spin = new THREE.Group();
       tilt.add(spin);
       // A ghost is a system the chart knows of but cannot read yet: drawn hollow.
-      const body = (r, sym) => {
+      // A solid body wears its token's logo when there is one; the colour shows until it loads.
+      const logos = !s.ghost && logosFor ? logosFor(s) : [];
+      const body = (r, sym, logo) => {
         const c = tokens[sym] || unknownColor;
         const mat = s.ghost
           ? new THREE.MeshBasicMaterial({ color: c, wireframe: true, transparent: true, opacity: 0.45 })
           : new THREE.MeshStandardMaterial({ color: c, roughness: 0.65, emissive: c, emissiveIntensity: s.outer ? 0.1 : 0.18 });
-        return new THREE.Mesh(new THREE.SphereGeometry(r, s.ghost ? 12 : 32, s.ghost ? 8 : 22), mat);
+        const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, s.ghost ? 12 : 40, s.ghost ? 8 : 28), mat);
+        if (logo) {
+          surface(logo, c).then((tex) => {
+            if (!tex || !mesh.parent) return; // logo missing, or the chart was redrawn meanwhile
+            mat.map = tex; mat.emissiveMap = tex;
+            mat.color.set(0xffffff); mat.emissive.set(0xffffff);
+            mat.emissiveIntensity = s.outer ? 0.3 : 0.38;
+            mat.needsUpdate = true;
+          });
+          // Planets with a logo turn on an upright axis, so the logo stays level.
+          bodies.push({ mesh, tilt, spin, turn: 0, v: 0.22 + ((i + bodies.length) % 4) * 0.05 });
+        }
+        return mesh;
       };
-      const A = body(ra, s.a);
+      const A = body(ra, s.a, logos[0]);
       A.position.x = -da;
       spin.add(A);
       if (!single) {
-        const B = body(rb, s.b);
+        const B = body(rb, s.b, logos[1]);
         B.position.x = db;
         spin.add(B);
       }
@@ -290,10 +415,17 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
 
   const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const v3 = new THREE.Vector3();
+  const upright = new THREE.Quaternion(), turned = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
   let last = performance.now();
   const frame = (now) => {
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
     if (!still) for (const s of spinners) s.g.rotation.y += s.v * dt;
+    // Undo the system's tilt and orbit for each logo planet, then turn it about the vertical.
+    for (const b of bodies) {
+      if (!still) b.turn += b.v * dt;
+      upright.copy(b.tilt.quaternion).multiply(b.spin.quaternion).invert();
+      b.mesh.quaternion.copy(upright).multiply(turned.setFromAxisAngle(Y, b.turn));
+    }
     const sp = Math.sin(view.pol);
     camera.position.set(target.x + view.dist * sp * Math.cos(view.az), target.y + view.dist * Math.cos(view.pol), target.z + view.dist * sp * Math.sin(view.az));
     camera.lookAt(target);
