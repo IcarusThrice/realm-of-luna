@@ -147,7 +147,7 @@ function render(next) {
   $('r-settled').textContent = settled.length ? formatMass(settled.reduce((t, s) => t + s.staked, 0), unit) : 'Not read yet';
   const paying = systems.filter((s) => s.tribute);
   $('r-tribute').textContent = paying.length ? formatMass(paying.reduce((t, s) => t + s.tribute.value, 0), paying[0].unit) : 'Not read yet';
-  $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} read live`;
+  $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} live`;
 }
 
 function tick() {

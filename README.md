@@ -15,6 +15,7 @@ The site is read-only. It never asks for a wallet and never builds a transaction
 | Prices | Derived on-chain from pool reserves, starting from native LUNA. ampLUNA and arbLUNA use the exchange rate their Eris contracts report. One USDC.inj is taken as one dollar |
 | Settled (staked amounts) | Read live from the four Eris asset-staking contracts. For a pool it is the staked LP as a share of the LP in issue; a single-token stake is sized by its staked amount |
 | Hollow systems | Single-token stakes whose token has no price path through the pools the chart reads, and anything that could not be read |
+| Small screens | On a phone the chart frames the plate and looks down more steeply; the outer orbit runs off the sides and comes round as the chart is turned. Labels that would be cut off by the edge or sit under a control are hidden |
 | Token logos | Each planet wears its token's logo, projected onto the sphere from three sides so it reads face-on as the planet turns. Logos are matched by token address, never by name. Tokens without a file keep a plain colour |
 | Crown systems | Pools named as holding chain-owned liquidity (Terra proposal 4844, Phoenix treasury posts) |
 | Tribute (voter incentives) | Read live from the Eris bribe manager: the tokens on offer for each asset, valued with the same on-chain prices. Tokens with no price path are listed by amount |

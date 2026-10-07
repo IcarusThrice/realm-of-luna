@@ -6,7 +6,9 @@ const BRASS = '#d0aa5c';
 const LINE = '#3a4560';
 const HOME = { az: 0.95, pol: 0.98 };
 const OUTER_RING = 19.8;
-const FIT_RADIUS = 25;
+const FIT_RADIUS = 25;          // wide screens: frame the whole chart, outer orbit included
+const FIT_RADIUS_TALL = 15.5;   // tall screens: frame the plate; the outer orbit runs off the sides
+const TALL_POL = 0.74;          // tall screens: look down more steeply, to use the height
 
 const rad = (d) => d * Math.PI / 180;
 
@@ -377,21 +379,34 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   }
 
   // Camera: drag to turn, wheel or pinch to zoom.
-  const view = { az: HOME.az, pol: HOME.pol, dist: 60, auto: true };
-  let W = 1, H = 1;
-  const fitDist = () => Math.min(150, Math.max(48, FIT_RADIUS / (Math.tan(rad(19)) * (W / H))));
+  // `auto` holds until the viewer zooms, `tilted` until they drag: until then the view
+  // keeps fitting itself to the stage, which matters when a phone is turned.
+  const view = { az: HOME.az, pol: HOME.pol, dist: 60, auto: true, tilted: false };
+  let W = 1, H = 1, dockBoxes = [];
+  // 0 on a wide stage, 1 on a tall one, blending between aspect ratios 1.25 and 0.85.
+  const tall = () => Math.min(1, Math.max(0, (1.25 - W / H) / 0.4));
+  const fitDist = () => {
+    const radius = FIT_RADIUS + (FIT_RADIUS_TALL - FIT_RADIUS) * tall();
+    return Math.min(150, Math.max(40, radius / (Math.tan(rad(19)) * (W / H))));
+  };
+  const homePol = () => HOME.pol + (TALL_POL - HOME.pol) * tall();
   const resize = () => {
     W = stage.clientWidth || 1; H = stage.clientHeight || 1;
     renderer.setSize(W, H, false);
     camera.aspect = W / H;
     camera.updateProjectionMatrix();
     if (view.auto) view.dist = fitDist();
+    if (!view.tilted) view.pol = homePol();
+    // Where the controls sit, so labels and place names can keep clear of them.
+    const frame = stage.getBoundingClientRect();
+    dockBoxes = Array.from(stage.querySelectorAll('.dock')).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0)
+      .map((r) => ({ l: r.left - frame.left - 4, r: r.right - frame.left + 4, t: r.top - frame.top - 4, b: r.bottom - frame.top + 4 }));
   };
   if (window.ResizeObserver) new ResizeObserver(resize).observe(stage); else window.addEventListener('resize', resize);
   resize();
 
   const zoom = (f) => { view.auto = false; view.dist = Math.min(170, Math.max(16, view.dist * f)); };
-  const reset = () => { view.az = HOME.az; view.pol = HOME.pol; view.auto = true; view.dist = fitDist(); };
+  const reset = () => { view.az = HOME.az; view.pol = homePol(); view.auto = true; view.tilted = false; view.dist = fitDist(); };
   const ptrs = {};
   let pinch = 0;
   canvas.addEventListener('pointerdown', (e) => {
@@ -403,6 +418,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     if (!p) return;
     const ids = Object.keys(ptrs);
     if (ids.length === 1) {
+      view.tilted = true;
       view.az -= (e.clientX - p.x) * 0.006;
       view.pol = Math.min(1.36, Math.max(0.3, view.pol - (e.clientY - p.y) * 0.005));
     }
@@ -447,8 +463,9 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     }
 
     // Labels: selected first, then Alliance before outer, then nearest. A label that
-    // would cover one already placed fades out; the system stays reachable from the
-    // list and by turning the chart.
+    // would cover one already placed, sit under a control, or run off the edge of the
+    // stage fades out; the system stays reachable from the list and by turning the chart.
+    // The selected system's label always shows.
     const spots = [];
     for (const s of systems) {
       const el = tagEls[s.id];
@@ -458,10 +475,11 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       spots.push({ s, el, x: (v3.x * 0.5 + 0.5) * W, y: (-v3.y * 0.5 + 0.5) * H + 4, z: v3.z });
     }
     spots.sort((p, q) => (q.s.id === selected) - (p.s.id === selected) || p.s.outer - q.s.outer || p.z - q.z);
-    const taken = [];
+    const taken = dockBoxes.slice();
     for (const p of spots) {
       const box = { l: p.x - p.s.box.w / 2 - 4, r: p.x + p.s.box.w / 2 + 4, t: p.y - 4, b: p.y + p.s.box.h + 4 };
-      const clash = taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t);
+      const cut = box.l < -2 || box.r > W + 2 || box.t < -2 || box.b > H + 2;
+      const clash = p.s.id !== selected && (cut || taken.some((o) => box.l < o.r && box.r > o.l && box.t < o.b && box.b > o.t));
       p.el.classList.toggle('hid', clash);
       if (!clash) taken.push(box);
       p.el.style.transform = `translate(${p.x.toFixed(1)}px,${p.y.toFixed(1)}px) translate(-50%,0)`;
