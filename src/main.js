@@ -17,6 +17,7 @@ let period = null;
 let tokens = {};          // every token on the chart, by key
 let shownToken = null;    // key of the token in the panel, or null when a pool is shown
 let quoted = false;       // true once the pools have been asked for quotes
+let quoteCount = 0;       // how many pools answered
 let market = null;        // outside prices by CoinGecko id, or null until asked
 const signed = (x) => (Math.abs(x) < 0.0005 ? '0.0%' : (x > 0 ? '+' : '\u2212') + (Math.abs(x) * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + '%');
 const VERDICT = { line: 'In line', thin: 'Off, but the pool is too thin to trade against', gap: 'Gap larger than fees' };
@@ -147,6 +148,7 @@ function showToken(key) {
   const pools = t && priced ? t.checks.length : 0;
   $('t-check-sum').textContent = !priced ? 'Nothing to compare: no pool on this chart gives this token a price.'
     : !quoted ? `${origin} Waiting for quotes from the pools.`
+    : !quoteCount ? `${origin} The pools could not be asked for quotes just now, so there is nothing to compare.`
     : !pools && !out ? `${origin} No other source to compare it with.`
     : `${origin} ${flagged ? `${flagged} ${flagged === 1 ? 'source disagrees' : 'sources disagree'} by more than fees explain.` : 'Every source agrees within fees.'}`;
 
@@ -313,6 +315,7 @@ function render(next) {
     }));
   }
   $('gaps-sum').textContent = !quoted ? 'Waiting for quotes from the pools.'
+    : !quoteCount ? 'The pools could not be asked for quotes just now, so prices come from their reserves and nothing is compared. Reload to try again.'
     : gaps.length ? `${gaps.length} ${gaps.length === 1 ? 'pool disagrees' : 'pools disagree'} with the rest by more than fees explain. A gap can be a real mispricing or an error, and is not a promise of profit.`
     : 'No pool with real depth disagrees with the others by more than its fees.';
 }
@@ -369,6 +372,7 @@ setInterval(tick, 60000);
     // ask DefiLlama for outside prices. Quotes sharpen every price on the chart.
     loadQuotes(pools, raw).then((quotes) => {
       quoted = true;
+      quoteCount = Object.keys(quotes).length;
       render(buildSystems(pools, live, { ...opts, quotes }));
     });
     loadMarket(MARKET_IDS).then((m) => {
