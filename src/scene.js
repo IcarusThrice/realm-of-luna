@@ -400,6 +400,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       const note = s.crown ? 'Crown system' : s.outer ? 'Outside the Alliance' : s.venue !== 'Astroport' ? s.venue : '';
       if (note) { const cr = document.createElement('i'); cr.textContent = note; tag.appendChild(cr); }
       tag.addEventListener('click', () => onSelect(s.id));
+      tag.addEventListener('dblclick', () => frameSystem(s.id));
       tag.setAttribute('aria-pressed', s.id === selected ? 'true' : 'false');
       tags.appendChild(tag);
       tagEls[s.id] = tag;
@@ -417,7 +418,9 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   // Camera: drag to turn, wheel or pinch to zoom.
   // `auto` holds until the viewer zooms, `tilted` until they drag: until then the view
   // keeps fitting itself to the stage, which matters when a phone is turned.
-  const view = { az: HOME.az, pol: HOME.pol, dist: 60, auto: true, tilted: false };
+  // `ty` is the height of the point the camera looks at, on the chart's central axis.
+  const HOME_Y = target.y;
+  const view = { az: HOME.az, pol: HOME.pol, dist: 60, ty: HOME_Y, auto: true, tilted: false };
   let W = 1, H = 1, dockBoxes = [];
   // 0 on a wide stage, 1 on a tall one, blending between aspect ratios 1.25 and 0.85.
   const tall = () => Math.min(1, Math.max(0, (1.25 - W / H) / 0.4));
@@ -441,8 +444,38 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   if (window.ResizeObserver) new ResizeObserver(resize).observe(stage); else window.addEventListener('resize', resize);
   resize();
 
-  const zoom = (f) => { view.auto = false; view.dist = Math.min(170, Math.max(16, view.dist * f)); };
-  const reset = () => { view.az = HOME.az; view.pol = homePol(); view.auto = true; view.tilted = false; view.dist = fitDist(); };
+  const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // The camera glides between views; any drag or zoom takes over at once.
+  let glide = null;
+  const glideTo = (to, then) => {
+    const turn = Math.atan2(Math.sin(to.az - view.az), Math.cos(to.az - view.az)); // the short way round
+    glide = { from: { az: view.az, pol: view.pol, dist: view.dist, ty: view.ty }, to: { az: view.az + turn, pol: to.pol, dist: to.dist, ty: to.ty }, t: still ? 1 : 0, then };
+  };
+  const zoom = (f) => { glide = null; view.auto = false; view.dist = Math.min(170, Math.max(10, view.dist * f)); };
+  const reset = () => glideTo({ az: HOME.az, pol: homePol(), dist: fitDist(), ty: HOME_Y }, () => { view.auto = true; view.tilted = false; view.dist = fitDist(); });
+
+  // Frame one system: stand just behind it, low, looking across the plate at the Moon,
+  // so the system sits in the lower part of the view and the Moon in the upper part.
+  const FRAME_SPREAD = rad(12); // the angle between the system and the Moon as seen from the camera
+  function frameSystem(id) {
+    const s = systems.find((x) => x.id === id);
+    if (!s) return;
+    const r = Math.hypot(s.pos.x, s.pos.z);
+    // How far behind the system the camera stands: further for a far-out or a large system.
+    const back = Math.min(26, Math.max(9, r * 1.1)) * (0.75 + 0.25 * Math.min(2, s.extent));
+    // Raise the camera until the system and the Moon are FRAME_SPREAD apart. A system close
+    // to the Moon can never get that far from it, so settle for the widest it reaches.
+    let best = null;
+    for (let h = s.pos.y + 0.3; h < s.pos.y + 30; h += 0.1) {
+      const toSystem = Math.atan2(h - s.pos.y, back), toMoon = Math.atan2(h - moon.position.y, back + r);
+      const spread = toSystem - toMoon;
+      if (!best || spread > best.spread) best = { h, spread, down: (toSystem + toMoon) / 2 };
+      if (spread >= FRAME_SPREAD) break;
+    }
+    // Look along the line halfway between the two, at the point where it meets the chart's axis.
+    view.auto = false; view.tilted = true;
+    glideTo({ az: Math.atan2(s.pos.z, s.pos.x), pol: Math.PI / 2 - best.down, dist: (back + r) / Math.cos(best.down), ty: best.h - (back + r) * Math.tan(best.down) });
+  }
   const ptrs = {};
   let pinch = 0;
   // Clicking a planet picks it. A press that moves is a drag, not a click.
@@ -454,9 +487,9 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     const hit = ray.intersectObjects([moon, ...pickable], false)[0];
     return hit ? (hit.object === moon ? { moon: true } : hit.object.userData.pick) : null;
   };
-  let press = null, hoverDue = null;
+  let press = null, hoverDue = null, lastClick = null;
   canvas.addEventListener('pointerdown', (e) => {
-    press = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+    press = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId }; // the event's own time, so a slow frame cannot stretch a click
     ptrs[e.pointerId] = { x: e.clientX, y: e.clientY };
     try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
   });
@@ -471,9 +504,10 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     }
     const ids = Object.keys(ptrs);
     if (ids.length === 1) {
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 0) glide = null;
       view.tilted = true;
       view.az -= (e.clientX - p.x) * 0.006;
-      view.pol = Math.min(1.36, Math.max(0.3, view.pol - (e.clientY - p.y) * 0.005));
+      view.pol = Math.min(1.47, Math.max(0.3, view.pol - (e.clientY - p.y) * 0.005));
     }
     p.x = e.clientX; p.y = e.clientY;
     if (ids.length === 2) {
@@ -485,17 +519,25 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   });
   const drop = (e) => { delete ptrs[e.pointerId]; pinch = 0; };
   canvas.addEventListener('pointerup', (e) => {
-    const clicked = press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 6 && performance.now() - press.t < 600;
+    const clicked = press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) < 6 && e.timeStamp - press.t < 600;
     press = null;
     drop(e);
-    if (!clicked || !onPick) return;
+    if (!clicked) return;
     const hit = planetAt(e);
-    if (hit) onPick(hit);
+    // A second click on the same spot within a moment is a double-click: frame the system,
+    // or go back to the opening view if it was the Moon. Works for a double tap too.
+    const now = e.timeStamp;
+    const twice = lastClick && now - lastClick.t < 450 && Math.hypot(e.clientX - lastClick.x, e.clientY - lastClick.y) < 30;
+    lastClick = twice ? null : { t: now, x: e.clientX, y: e.clientY };
+    if (twice) {
+      if (hit && hit.moon) reset(); else if (hit) frameSystem(hit.id);
+      return;
+    }
+    if (hit && onPick) onPick(hit);
   });
   canvas.addEventListener('pointercancel', drop);
   canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
 
-  const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const v3 = new THREE.Vector3();
   const upright = new THREE.Quaternion(), turned = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0);
   let last = performance.now(), clock = 0;
@@ -508,6 +550,13 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       moon.rotation.y += 0.02 * dt;
       belt.rotation.y += 0.004 * dt;
     }
+    if (glide) {
+      // By the clock, not by frames, so a slow device finishes the move in the same time.
+      if (glide.t < 1) { glide.start = glide.start || now; glide.t = Math.min(1, (now - glide.start) / 1100); }
+      const k = glide.t < 0.5 ? 4 * glide.t ** 3 : 1 - Math.pow(-2 * glide.t + 2, 3) / 2; // ease in and out
+      for (const key of ['az', 'pol', 'dist', 'ty']) view[key] = glide.from[key] + (glide.to[key] - glide.from[key]) * k;
+      if (glide.t >= 1) { const then = glide.then; glide = null; if (then) then(); }
+    }
     if (skyFade >= 0 && skyFade < 1) { skyFade = Math.min(1, skyFade + dt / 1.4); skyMat.opacity = skyFade; }
     // Undo the system's tilt and orbit for each logo planet, then turn it about the vertical.
     for (const b of bodies) {
@@ -516,6 +565,7 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
       b.mesh.quaternion.copy(upright).multiply(turned.setFromAxisAngle(Y, b.turn));
     }
     const sp = Math.sin(view.pol);
+    target.y = view.ty;
     camera.position.set(target.x + view.dist * sp * Math.cos(view.az), target.y + view.dist * Math.cos(view.pol), target.z + view.dist * sp * Math.sin(view.az));
     camera.lookAt(target);
     camera.updateMatrixWorld();
@@ -575,5 +625,6 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
     setCourt(text) { court.sub.textContent = text; court.box = null; },
     zoom,
     reset,
+    frame: frameSystem,
   };
 }
