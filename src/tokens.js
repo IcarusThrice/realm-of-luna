@@ -54,3 +54,18 @@ export function tokenAbout(key) {
   const sym = (KNOWN_ASSETS[key] && KNOWN_ASSETS[key].symbol) || symbolForKey(key);
   return (sym && ABOUT[sym]) || '';
 }
+
+// CoinGecko ids, from the chain registry, used to ask DefiLlama for an outside price.
+// Bridged tokens share the id of the asset they stand for.
+const MARKET_ID = {
+  LUNA: 'terra-luna-2', ampLUNA: 'eris-amplified-luna', arbLUNA: 'eris-arbitrage-luna',
+  'USDC.inj': 'usd-coin', 'USDC.noble': 'usd-coin', 'USDC.axl': 'usd-coin', USDT: 'tether', 'USDT.axl': 'tether',
+  EURe: 'monerium-eur-money', SOLID: 'solid-2', CAPA: 'capapult', ATOM: 'cosmos', stATOM: 'stride-staked-atom',
+  INJ: 'injective-protocol', PAXG: 'pax-gold', 'wBTC.atom': 'wrapped-bitcoin', 'wBTC.axl': 'wrapped-bitcoin',
+  wstETH: 'wrapped-steth', 'wETH.axl': 'weth', ASTRO: 'astroport-fi', ROAR: 'lion-dao',
+};
+export function marketId(key) {
+  const sym = (KNOWN_ASSETS[key] && KNOWN_ASSETS[key].symbol) || symbolForKey(key);
+  return (sym && MARKET_ID[sym]) || null;
+}
+export const MARKET_IDS = Array.from(new Set(Object.values(MARKET_ID)));

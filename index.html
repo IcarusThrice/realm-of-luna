@@ -59,6 +59,11 @@
           <div><dt>In these pools<small id="t-held-note">Held across the systems on this chart</small></dt><dd id="t-held"></dd></div>
         </dl>
         <div>
+          <h3>Price check</h3>
+          <p class="about" id="t-check-sum"></p>
+          <div class="checks" id="t-checks"></div>
+        </div>
+        <div>
           <h3>Orbits in</h3>
           <div class="chips" id="t-systems"></div>
         </div>
@@ -96,6 +101,12 @@
       <p class="note">Read-only preview. The Alliance list, vote shares, staked amounts and tribute are read live from the Eris contracts, and reserves from the exchanges. Yield is an estimate worked out from the chain's reward settings; Eris's own APR also adds swap fees. Hollow systems are known but not sized yet. <a href="/discover">Open the pair finder</a>.</p>
 
       <div>
+        <h3>Price gaps</h3>
+        <p class="about" id="gaps-sum">Waiting for quotes from the pools.</p>
+        <div class="checks" id="gaps"></div>
+      </div>
+
+      <div>
         <h3>All systems</h3>
         <div class="list" id="list"></div>
       </div>
@@ -104,6 +115,7 @@
         <h3>Reading the chart</h3>
         <dl class="key">
           <dt>Sector</dt><dd>One of the four reward gauges: Stable, Project, Bluechip, Single</dd>
+          <dt>Price gap</dt><dd>Two pools disagreeing on a token's price by more than their fees. It can be a real mispricing or an error, and it is not a promise of profit: fees, slippage and thin pools can swallow it</dd>
           <dt>Planet</dt><dd>One token. Click a planet to see its price, how much of it is on Terra, and every system it orbits in</dd>
           <dt>System</dt><dd>A liquidity pool, drawn as two bodies in orbit: one for each token in the pair. A single-token stake is a lone star</dd>
           <dt>Mass</dt><dd>The deeper the pool, the larger its bodies</dd>

@@ -9,19 +9,25 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // Prices spread outward from native LUNA. Constant-product (xyk) pools go first because
 // their reserve ratio is the price; other pool types are only an approximation. Within a
 // type the deepest pool goes first, so a thin skewed pool cannot set a price a deep pool
-// also knows. A pool whose priced side is worth less than `floor` LUNA sets no price at
+// also knows. A pool that carries a `quote` ({ from, to, rate }: what a small trade really
+// pays) is as exact as a constant-product pool and is priced from the quote. A pool whose priced side is worth less than `floor` LUNA sets no price at
 // all. `known` seeds exact prices (ampLUNA from the Eris hub). `pegs` are groups of keys
-// valued alike (dollar stablecoins).
-export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {}, floor = 0 } = {}) {
+// valued alike (dollar stablecoins). Pass `trace: {}` to learn where each price came from:
+// { via: 'anchor' | 'known' | 'peg' | 'pool', id? }.
+export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {}, floor = 0, trace = null } = {}) {
   const prices = { ...known, [anchor]: 1 };
-  const setPrice = (key, price) => {
+  const note = (key, src) => { if (trace) trace[key] = src; };
+  note(anchor, { via: 'anchor' });
+  const setPrice = (key, price, src) => {
     prices[key] = price;
+    if (src) note(key, src);
     for (const group of pegs) {
-      if (group.includes(key)) for (const k of group) if (!(k in prices)) prices[k] = price;
+      if (group.includes(key)) for (const k of group) if (!(k in prices)) { prices[k] = price; note(k, { via: 'peg', of: key }); }
     }
   };
-  for (const key of Object.keys(known)) setPrice(key, known[key]);
+  for (const key of Object.keys(known)) setPrice(key, known[key], { via: 'known' });
   const usable = (p) => p && p.assets && p.assets.length === 2 && p.assets.every((a) => a.amount > 0);
+  const quoted = (p) => p.quote && p.quote.rate > 0;
   const todo = new Set(pools.filter(usable));
   for (;;) {
     let best = null, bestVal = 0, bestRank = 9;
@@ -31,12 +37,18 @@ export function priceByKey(pools, { anchor = 'uluna', pegs = [], known = {}, flo
       if (priced.length !== 1) continue;
       const val = priced[0].amount * prices[priced[0].key];
       if (val < floor) continue;
-      const rank = p.type === 'xyk' ? 0 : 1;
+      // Market prices first. A token priced by its own contract's redemption rate (`known`)
+      // can trade a little under that rate, so it prices its neighbours only as a last resort.
+      const rank = (p.type === 'xyk' || quoted(p) ? 0 : 1) + (priced[0].key in known ? 2 : 0);
       if (rank < bestRank || (rank === bestRank && val > bestVal)) { best = p; bestVal = val; bestRank = rank; }
     }
     if (!best) break;
     const unknown = best.assets.find((a) => !(a.key in prices));
-    setPrice(unknown.key, bestVal / unknown.amount);
+    const other = best.assets.find((a) => a.key in prices);
+    // A quote is the pool's real exchange rate. Without one, fall back to the reserve ratio.
+    let price = bestVal / unknown.amount;
+    if (quoted(best)) price = best.quote.from === unknown.key ? prices[other.key] * best.quote.rate : prices[other.key] / best.quote.rate;
+    setPrice(unknown.key, price, { via: 'pool', id: best.id });
     todo.delete(best);
   }
   return prices;
@@ -61,6 +73,7 @@ export function rankByDepth(pools, opts) {
 //   opts.usdKey            token taken as one dollar; dollars then come from the chain itself
 //   opts.lunaUsd           fallback LUNA price when no pool holds usdKey
 //   opts.stakes            from stakesFor(): what is staked through the Alliance
+//   opts.quotes            { poolId: { from, to, rate, fee } }: what each pool really pays
 //   opts.tributes          { 'gauge assetKey': [{ key, symbol, amount }] }: voter incentives
 //   opts.emission          from gaugeEmission(): LUNA each gauge earns per year
 // Each system gets: live (priced reserves), ghost (nothing to read yet), value, unit,
@@ -76,9 +89,11 @@ export function rankByDepth(pools, opts) {
 // of the stake the Alliance takes each year) and yield (rewardRate less take, which is how
 // the Eris Liquidity Hub states its APR, bar swap fees). All are estimates.
 export function buildSystems(pools, live = {}, opts = {}) {
+  const quotes = opts.quotes || {};
+  const trace = {};
   const prices = priceByKey(
-    pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type })),
-    { pegs: opts.pegs || [], known: opts.known || {} },
+    pools.filter((p) => live[p.id]).map((p) => ({ assets: live[p.id], type: p.type, id: p.id, quote: quotes[p.id] })),
+    { pegs: opts.pegs || [], known: opts.known || {}, trace },
   );
   const lunaUsd = opts.usdKey && prices[opts.usdKey] > 0 ? 1 / prices[opts.usdKey] : opts.lunaUsd > 0 ? opts.lunaUsd : 0;
   const unit = lunaUsd ? 'USD' : 'LUNA';
@@ -91,14 +106,21 @@ export function buildSystems(pools, live = {}, opts = {}) {
   };
 
   const scale = lunaUsd || 1;
+  // Where a token's price came from. LUNA is the anchor, but its dollar price comes from
+  // whichever pool priced the dollar token, so that pool is recorded as `id` too.
+  const usdFrom = opts.usdKey && prices[opts.usdKey] > 0 && trace[opts.usdKey] && trace[opts.usdKey].via === 'pool' ? trace[opts.usdKey].id : null;
+  const sourceOf = (key) => {
+    const src = trace[key] || null;
+    return src && src.via === 'anchor' && usdFrom ? { via: 'anchor', id: usdFrom } : src;
+  };
   const part = (key, symbol, amount) => {
     const priced = prices[key] > 0;
-    return { key, symbol, amount, price: priced ? prices[key] * scale : null, value: priced ? amount * prices[key] * scale : null };
+    return { key, symbol, amount, price: priced ? prices[key] * scale : null, value: priced ? amount * prices[key] * scale : null, source: sourceOf(key) };
   };
 
   const systems = pools.map((p) => {
     const assets = live[p.id];
-    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, keys: null, parts: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
+    const s = { ...p, outer: !!p.outer, live: false, ghost: !p.pair, value: null, unit, amounts: null, keys: null, parts: null, quote: null, shareA: p.kind === 'single' ? 1 : 0.5, staked: null, stakedShare: null, tribute: tributeOf(p) };
     const stake = (opts.stakes || {})[p.id];
     if (p.kind === 'single') {
       if (p.asset) s.keys = [p.asset]; // a single stake's asset is the token itself
@@ -123,6 +145,7 @@ export function buildSystems(pools, live = {}, opts = {}) {
     s.a = first.symbol; s.b = second.symbol;
     s.keys = [first.key, second.key];
     s.parts = [part(first.key, first.symbol, first.amount), part(second.key, second.symbol, second.amount)];
+    s.quote = quotes[p.id] || null;
     s.amounts = [{ symbol: first.symbol, amount: first.amount }, { symbol: second.symbol, amount: second.amount }];
     const { vals, depth } = poolDepth([first, second], prices);
     if (!(depth > 0)) return s;
@@ -153,21 +176,62 @@ export function buildSystems(pools, live = {}, opts = {}) {
 }
 
 // Every token on the chart, gathered across the systems that hold it.
-// Returns { key: { key, symbol, price, unit, amount, value, systems: [{ id, name, amount, value, outer }] } }:
-// amount and value are totals across read systems, and systems are deepest first.
+// Returns { key: { key, symbol, price, source, unit, amount, value, systems, checks } }:
+// amount and value are totals across read systems; systems are deepest first.
+// checks compare pools: each quoting pool that holds the token implies a price for it
+// (its exchange rate times the chart's price for the other token). `gap` is how far that
+// sits from the chart's price for this token; `sets` marks the pool the chart price came
+// from, which is zero by construction.
 export function tokenIndex(systems) {
   const out = {};
+  const entry = (p, unit) => out[p.key] || (out[p.key] = { key: p.key, symbol: p.symbol, price: null, source: null, unit, amount: 0, value: 0, systems: [], checks: [] });
   for (const s of systems) {
     for (const p of s.parts || []) {
-      const t = out[p.key] || (out[p.key] = { key: p.key, symbol: p.symbol, price: null, unit: s.unit, amount: 0, value: 0, systems: [] });
-      if (p.price != null) t.price = p.price;
+      const t = entry(p, s.unit);
+      if (p.price != null) { t.price = p.price; t.source = p.source; }
       t.amount += p.amount;
       if (p.value != null) t.value += p.value;
       t.systems.push({ id: s.id, name: pairName(s), amount: p.amount, value: p.value, outer: s.outer });
     }
+    const q = s.quote, parts = s.parts || [];
+    if (!q || !(q.rate > 0) || parts.length !== 2 || parts.some((p) => p.price == null)) continue;
+    parts.forEach((p, i) => {
+      const other = parts[1 - i];
+      const implied = p.key === q.from ? q.rate * other.price : other.price / q.rate;
+      entry(p, s.unit).checks.push({
+        id: s.id, name: pairName(s), against: other.symbol, implied, gap: implied / p.price - 1,
+        depth: s.value, fee: q.fee, outer: s.outer, sets: !!(p.source && p.source.id === s.id && (p.source.via === 'pool' || p.source.via === 'anchor')),
+      });
+    });
   }
-  for (const t of Object.values(out)) t.systems.sort((x, y) => (y.value || 0) - (x.value || 0) || y.amount - x.amount);
+  for (const t of Object.values(out)) {
+    t.systems.sort((x, y) => (y.value || 0) - (x.value || 0) || y.amount - x.amount);
+    t.checks.sort((x, y) => (y.depth || 0) - (x.depth || 0));
+  }
   return out;
+}
+
+// How to read one check. A gap smaller than twice the pool's fee (and never under 1%) is
+// 'line': fees alone explain it. A larger gap in a pool too small to trade against is
+// 'thin'. A larger gap in a deeper pool is 'gap': a real dislocation, or an error.
+export const THIN_POOL = { USD: 5000, LUNA: 100000 };
+export function gapFlag(check, unit = 'USD') {
+  const tolerance = Math.max(0.01, 2 * (check.fee || 0));
+  if (Math.abs(check.gap) < tolerance) return 'line';
+  return (check.depth || 0) < (THIN_POOL[unit] || THIN_POOL.USD) ? 'thin' : 'gap';
+}
+
+// The gaps worth a look across the whole chart: one per pool, largest money first.
+export function priceGaps(tokens) {
+  const seen = new Map();
+  for (const t of Object.values(tokens)) {
+    for (const c of t.checks) {
+      if (c.sets || gapFlag(c, t.unit) !== 'gap') continue;
+      const prev = seen.get(c.id);
+      if (!prev || Math.abs(c.gap) > Math.abs(prev.gap)) seen.set(c.id, { ...c, key: t.key, symbol: t.symbol, unit: t.unit });
+    }
+  }
+  return Array.from(seen.values()).sort((x, y) => Math.abs(y.gap) * (y.depth || 0) - Math.abs(x.gap) * (x.depth || 0));
 }
 
 // Turn raw staking-contract balances into what buildSystems needs.

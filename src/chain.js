@@ -117,11 +117,13 @@ export async function resolveAsset(info) {
 // supply is the pool's LP tokens in issue, in the token's smallest unit.
 async function readPool(pair) {
   const pool = await smart(pair, { pool: {} });
-  const assets = await Promise.all(pool.assets.map(async (a) => {
+  const raw = [];
+  const assets = await Promise.all(pool.assets.map(async (a, i) => {
     const meta = await resolveAsset(a.info);
+    raw[i] = { info: a.info, key: meta.key, amount: Number(a.amount), decimals: meta.decimals };
     return { key: meta.key, symbol: meta.symbol, amount: Number(a.amount) / 10 ** meta.decimals };
   }));
-  return { assets, supply: Number(pool.total_share) };
+  return { assets, supply: Number(pool.total_share), raw };
 }
 
 // One Astroport pair -> [{ key, symbol, amount }].
@@ -130,15 +132,18 @@ export async function loadPool(pair) {
 }
 
 // Load every pool that has a pair address. Never throws: failures are reported per pool.
-// Returns { live: { id: assets }, supply: { id: LP tokens in issue }, errors }.
+// Returns { live: { id: assets }, supply: { id: LP tokens in issue }, raw: { id: reserves
+// as the pool reports them, for asking it for a quote }, errors }.
 export async function loadLive(pools) {
   const live = {};
   const supply = {};
+  const raw = {};
   const errors = [];
   const missed = [];
   const read = async (p) => {
     const pool = await readPool(p.pair);
     live[p.id] = pool.assets;
+    raw[p.id] = pool.raw;
     if (pool.supply > 0) supply[p.id] = pool.supply;
   };
   await pooled(pools.filter((p) => p.pair), 6, async (p) => {
@@ -148,7 +153,48 @@ export async function loadLive(pools) {
   for (const p of missed) {
     try { await read(p); } catch (err) { errors.push(`${p.id}: ${err.message}`); }
   }
-  return { live, supply, errors };
+  return { live, supply, raw, errors };
+}
+
+// --- Quotes: what each pool would actually pay ----------------------------------------------
+// A pool's reserves do not give its price unless it is a plain constant-product pool, so
+// ask each pool to simulate a small trade (one ten-thousandth of its first reserve).
+// Returns { poolId: { from, to, rate, fee } }: one `from` buys `rate` of `to` before fees,
+// and `fee` is the share of the output the pool keeps. Pools that will not quote are left out.
+export async function loadQuotes(pools, raw) {
+  const out = {};
+  await pooled(pools.filter((p) => p.pair && raw[p.id] && raw[p.id].length === 2), 4, async (p) => {
+    const [a, b] = raw[p.id];
+    const offer = Math.max(1000, Math.round(a.amount / 10000));
+    if (!(a.amount > 0) || !(b.amount > 0) || offer > a.amount / 50) return; // empty, or too small to quote fairly
+    try {
+      // BigInt prints every digit; a plain number this large would print as 2.1e+27.
+      const sim = await smart(p.pair, { simulation: { offer_asset: { info: a.info, amount: BigInt(offer).toString() } } });
+      // Astroport reports its cut as commission_amount; other exchanges as *_fee_amount.
+      let fees = 0;
+      for (const [k, v] of Object.entries(sim)) if (k === 'commission_amount' || k.endsWith('_fee_amount')) fees += Number(v) || 0;
+      const got = Number(sim.return_amount) + fees;
+      if (!(got > 0)) return;
+      out[p.id] = { from: a.key, to: b.key, rate: (got / 10 ** b.decimals) / (offer / 10 ** a.decimals), fee: fees / got };
+    } catch (err) { /* this pool keeps its reserve-ratio price */ }
+  });
+  return out;
+}
+
+// Prices from outside Terra, from DefiLlama's free price service, for comparison only.
+// ids are CoinGecko ids. Returns { id: { price, at } } (at in ms), or {} if unreachable.
+export async function loadMarket(ids) {
+  if (!ids.length) return {};
+  try {
+    const json = await getJson('https://coins.llama.fi/prices/current/' + ids.map((id) => 'coingecko:' + id).join(','), 8000);
+    const out = {};
+    for (const [k, v] of Object.entries(json.coins || {})) {
+      if (v && v.price > 0) out[k.replace(/^coingecko:/, '')] = { price: v.price, at: (v.timestamp || 0) * 1000 };
+    }
+    return out;
+  } catch (err) {
+    return {};
+  }
 }
 
 // --- The Liquidity Alliance, read from its gauge contract ---------------------------------

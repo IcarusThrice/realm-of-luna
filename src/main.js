@@ -1,11 +1,11 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
 import { ERIS_LIQUIDITY_HUB, ERIS_CONNECTORS, PEGS, USDC_INJ } from './config.js';
 import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
-import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, loadTokenFacts, lunaUsd, knownRates } from './chain.js';
-import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, tokenIndex, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
+import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, loadTokenFacts, loadQuotes, loadMarket, lunaUsd, knownRates } from './chain.js';
+import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, tokenIndex, gapFlag, priceGaps, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
 import { logosFor, logoFor } from './logos.js';
-import { tokenKind, tokenAbout } from './tokens.js';
+import { tokenKind, tokenAbout, marketId, MARKET_IDS } from './tokens.js';
 
 const $ = (id) => document.getElementById(id);
 const POOL_TYPES = { xyk: 'constant-product pool', concentrated: 'concentrated pool', stable: 'stable pool' };
@@ -16,6 +16,24 @@ let listEls = {};
 let period = null;
 let tokens = {};          // every token on the chart, by key
 let shownToken = null;    // key of the token in the panel, or null when a pool is shown
+let quoted = false;       // true once the pools have been asked for quotes
+let market = null;        // outside prices by CoinGecko id, or null until asked
+const signed = (x) => (Math.abs(x) < 0.0005 ? '0.0%' : (x > 0 ? '+' : '\u2212') + (Math.abs(x) * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + '%');
+const VERDICT = { line: 'In line', thin: 'Off, but the pool is too thin to trade against', gap: 'Gap larger than fees' };
+
+// One row of a price check: a place, the price there, and how far it sits from the chart's.
+function checkRow({ label, onClick, priceText, gapText, note, flag }) {
+  const row = document.createElement('div');
+  row.className = 'check' + (flag ? ' flag' : '');
+  const name = document.createElement(onClick ? 'button' : 'span');
+  if (onClick) { name.type = 'button'; name.addEventListener('click', onClick); }
+  name.textContent = label;
+  const p = document.createElement('span'); p.textContent = priceText;
+  const g = document.createElement('span'); g.className = 'gap'; g.textContent = gapText;
+  row.append(name, p, g);
+  if (note) { const n = document.createElement('small'); n.textContent = note; row.appendChild(n); }
+  return row;
+}
 let yieldRead = false; // true once the chain's reward figures are read
 const percent = (x) => (x >= 10 ? 'over 1,000%' : (x < 0 ? '\u2212' : '') + (Math.abs(x) * 100).toFixed(Math.abs(x) < 0.1 ? 1 : 0) + '%');
 
@@ -94,6 +112,43 @@ function showToken(key) {
     b.addEventListener('click', () => select(sys.id));
     row.appendChild(b);
   }
+
+  // Price check: the same token, priced by each pool that holds it and by the outside market.
+  const rows = $('t-checks');
+  rows.textContent = '';
+  const src = t && t.source;
+  const origin = !priced ? '' : src && src.via === 'pool' ? `The chart's price comes from ${(t.systems.find((x) => x.id === src.id) || {}).name || 'its deepest pool'}.`
+    : src && src.via === 'known' ? "The chart's price is the rate its own contract redeems at, so pools can trade below it."
+    : src && src.via === 'peg' ? "The chart prices this at one US dollar, like the other dollar tokens."
+    : src && src.via === 'anchor' && t.unit === 'USD' ? `The chart's dollar price for LUNA comes from ${(t.systems.find((x) => x.id === src.id) || {}).name || 'its deepest pool against USDC.inj'}.` : '';
+  let flagged = 0;
+  for (const c of t && priced ? t.checks : []) {
+    const verdict = c.sets ? 'line' : gapFlag(c, t.unit);
+    if (verdict === 'gap') flagged++;
+    rows.appendChild(checkRow({
+      label: c.name, onClick: () => select(c.id), priceText: money(c.implied, t.unit), gapText: c.sets ? 'sets it' : signed(c.gap),
+      note: c.sets ? '' : verdict === 'line' ? '' : VERDICT[verdict], flag: verdict === 'gap',
+    }));
+  }
+  const mid = marketId(key), out = market && mid ? market[mid] : null;
+  if (mid && priced && t.unit === 'USD') {
+    if (out) {
+      const gap = out.price / t.price - 1, hours = (Date.now() - out.at) / 3.6e6, stale = !(hours < 6);
+      const off = !stale && Math.abs(gap) > 0.03;
+      if (off) flagged++;
+      rows.appendChild(checkRow({
+        label: 'Outside market (DefiLlama)', priceText: money(out.price, 'USD'), gapText: signed(gap), flag: off,
+        note: stale ? 'This outside price is more than six hours old, so it is not judged.' : off ? 'More than 3% from the price on Terra' : '',
+      }));
+    } else {
+      rows.appendChild(checkRow({ label: 'Outside market (DefiLlama)', priceText: market ? 'No price listed' : 'Reading\u2026', gapText: '' }));
+    }
+  }
+  const pools = t && priced ? t.checks.length : 0;
+  $('t-check-sum').textContent = !priced ? 'Nothing to compare: no pool on this chart gives this token a price.'
+    : !quoted ? `${origin} Waiting for quotes from the pools.`
+    : !pools && !out ? `${origin} No other source to compare it with.`
+    : `${origin} ${flagged ? `${flagged} ${flagged === 1 ? 'source disagrees' : 'sources disagree'} by more than fees explain.` : 'Every source agrees within fees.'}`;
 
   $('t-key').textContent = key;
   $('t-copy').textContent = key.startsWith('terra1') ? 'Copy address' : 'Copy denom';
@@ -245,6 +300,21 @@ function render(next) {
   const paying = systems.filter((s) => s.tribute);
   $('r-tribute').textContent = paying.length ? formatMass(paying.reduce((t, s) => t + s.tribute.value, 0), paying[0].unit) : 'Not read yet';
   $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} live`;
+
+  // Price gaps across the whole chart, so nobody has to open every planet to find one.
+  const gaps = priceGaps(tokens);
+  const gapList = $('gaps');
+  gapList.textContent = '';
+  for (const g of gaps.slice(0, 8)) {
+    gapList.appendChild(checkRow({
+      label: `${g.symbol} in ${g.name}`, onClick: () => { select(g.id); showToken(g.key); },
+      priceText: money(g.implied, g.unit), gapText: signed(g.gap), flag: true,
+      note: `Against ${g.against}, this pool has ${g.symbol} ${g.gap > 0 ? 'above' : 'below'} the chart's price. Pool depth ${formatMass(g.depth, g.unit)}.`,
+    }));
+  }
+  $('gaps-sum').textContent = !quoted ? 'Waiting for quotes from the pools.'
+    : gaps.length ? `${gaps.length} ${gaps.length === 1 ? 'pool disagrees' : 'pools disagree'} with the rest by more than fees explain. A gap can be a real mispricing or an error, and is not a promise of profit.`
+    : 'No pool with real depth disagrees with the others by more than its fees.';
 }
 
 function tick() {
@@ -287,13 +357,24 @@ setInterval(tick, 60000);
   loadEscrow().then((e) => {
     if (e && chart) chart.setCourt(`${e.locks} locks hold ${formatAmount(e.votes)} votes`);
   });
-  const [{ live, supply, errors }, staked, tributes, chainPay, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), loadEmission(), lunaUsd(), knownRates()]);
+  const [{ live, supply, raw, errors }, staked, tributes, chainPay, price, known] = await Promise.all([loadLive(pools), loadStaked(gaugeAssets), loadTribute(), loadEmission(), lunaUsd(), knownRates()]);
   const emission = chainPay ? gaugeEmission({ ...chainPay, connectors: ERIS_CONNECTORS }) : {};
   if (Object.keys(emission).length) yieldRead = true;
   if (errors.length) console.warn('Realm of Luna: some pools could not be read.', errors);
   if (Object.keys(live).length) {
     const stakes = stakesFor(pools, staked, supply);
-    render(buildSystems(pools, live, { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes, tributes, emission }));
+    const opts = { pegs: PEGS, known, usdKey: USDC_INJ, lunaUsd: price, stakes, tributes, emission };
+    render(buildSystems(pools, live, opts));
+    // Second pass, in the background: ask each pool what a small trade really pays, and
+    // ask DefiLlama for outside prices. Quotes sharpen every price on the chart.
+    loadQuotes(pools, raw).then((quotes) => {
+      quoted = true;
+      render(buildSystems(pools, live, { ...opts, quotes }));
+    });
+    loadMarket(MARKET_IDS).then((m) => {
+      market = m;
+      if (shownToken) showToken(shownToken);
+    });
   } else {
     render(buildSystems(pools));
     $('r-data').textContent = 'Chain unreachable';

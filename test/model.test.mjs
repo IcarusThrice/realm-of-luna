@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceByKey, rankByDepth, buildSystems, mergeAlliance, stakesFor, tokenIndex, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
+import { priceByKey, rankByDepth, buildSystems, mergeAlliance, stakesFor, tokenIndex, gapFlag, priceGaps, layout, nextCycle, formatCountdown, formatMass, pairName, PLATE_RADIUS } from '../src/model.js';
 import { smartPath, encodeSmartQuery, decodeSmartResponse } from '../src/chain.js';
 import { POOLS, ALLIANCE, OUTER, SECTORS, TOKENS } from '../src/realm.js';
 import { PEGS, KNOWN_ASSETS, USDC_INJ } from '../src/config.js';
@@ -325,8 +325,8 @@ test('tokens are gathered across every system that holds them', () => {
   const systems = buildSystems(pools, live, { stakes, lunaUsd: 0.5 });
   const x = systems.find((s) => s.id === 'x');
   assert.deepEqual(x.parts, [
-    { key: 'uluna', symbol: 'LUNA', amount: 100, price: 0.5, value: 50 },
-    { key: 'key-FOO', symbol: 'FOO', amount: 50, price: 1, value: 50 },
+    { key: 'uluna', symbol: 'LUNA', amount: 100, price: 0.5, value: 50, source: { via: 'anchor' } },
+    { key: 'key-FOO', symbol: 'FOO', amount: 50, price: 1, value: 50, source: { via: 'pool', id: 'x' } },
   ]);
   const t = tokenIndex(systems);
   assert.deepEqual(Object.keys(t).sort(), ['key-BAR', 'key-FOO', 'key-ZED', 'uluna']);
@@ -343,4 +343,65 @@ test('token descriptions go by key, never by the name a token gives itself', asy
   assert.match(tokenAbout('terra13lc4xzfmzfgds5zux5pp3zuqf665akrdzwlumnjykrt850n96lvsz5y0wg'), /Deep State Luna/);
   assert.equal(tokenAbout('terra1fake'), '');
   assert.deepEqual(['uluna', 'ibc/AB', 'factory/terra1x/y', 'terra1abc'].map(tokenKind), ['Native coin of Terra', 'Arrived from another chain over IBC', 'Issued on Terra by a contract', 'Contract token on Terra']);
+});
+
+test('a quote sets the price where reserves alone would mislead', () => {
+  // A concentrated pool holding 100 LUNA and 400 FOO really trades at 2 FOO per LUNA.
+  const pools = [{ id: 'c', type: 'concentrated', assets: pool('LUNA', 100, 'FOO', 400), quote: { from: 'uluna', to: 'key-FOO', rate: 2 } }];
+  assert.equal(priceByKey(pools)['key-FOO'], 0.5);
+  assert.equal(priceByKey([{ ...pools[0], quote: { from: 'key-FOO', to: 'uluna', rate: 0.5 } }])['key-FOO'], 0.5, 'either direction');
+  assert.equal(priceByKey([{ ...pools[0], quote: null }])['key-FOO'], 0.25, 'no quote: the reserve ratio');
+  const trace = {};
+  priceByKey(pools, { known: { 'key-AMP': 2 }, pegs: [['key-FOO', 'key-PEG']], trace });
+  assert.deepEqual(trace, { uluna: { via: 'anchor' }, 'key-AMP': { via: 'known' }, 'key-FOO': { via: 'pool', id: 'c' }, 'key-PEG': { via: 'peg', of: 'key-FOO' } });
+});
+
+test('pools that disagree on a price are found, and thin ones are told apart', () => {
+  const pools = [
+    { id: 'deep', a: 'LUNA', b: 'USD', sector: 'stable', kind: 'pair', type: 'concentrated', pair: 'p1' },
+    { id: 'off', a: 'LUNA', b: 'FOO', sector: 'project', kind: 'pair', type: 'xyk', pair: 'p2' },
+    { id: 'tri', a: 'USD', b: 'FOO', outer: true, kind: 'pair', type: 'xyk', pair: 'p3' },
+    { id: 'tiny', a: 'LUNA', b: 'FOO', outer: true, kind: 'pair', type: 'xyk', pair: 'p4' },
+    { id: 'mute', a: 'LUNA', b: 'BAR', outer: true, kind: 'pair', type: 'xyk', pair: 'p5' },
+  ];
+  const USD = 'key-USD';
+  const live = {
+    deep: [asset('LUNA', 2e6), asset('USD', 1e5, USD)], off: pool('LUNA', 4e5, 'FOO', 2e4), tri: [asset('USD', 1e4, USD), asset('FOO', 1e4)],
+    tiny: pool('LUNA', 2000, 'FOO', 100), mute: pool('LUNA', 10, 'BAR', 5),
+  };
+  const quotes = {
+    deep: { from: 'uluna', to: USD, rate: 0.05, fee: 0.003 },       // LUNA = $0.05
+    off: { from: 'uluna', to: 'key-FOO', rate: 0.05, fee: 0.003 },  // FOO = $1.00, set here (the deepest pool with FOO)
+    tri: { from: USD, to: 'key-FOO', rate: 0.96, fee: 0.003 },      // ...but against dollars FOO costs $1.0417
+    tiny: { from: 'uluna', to: 'key-FOO', rate: 0.04, fee: 0.003 }, // and a tiny pool has it at $1.25
+  };
+  const t = tokenIndex(buildSystems(pools, live, { usdKey: USD, quotes }));
+  const foo = t['key-FOO'];
+  assert.ok(Math.abs(foo.price - 1) < 1e-9);
+  assert.deepEqual(foo.source, { via: 'pool', id: 'off' });
+  const by = Object.fromEntries(foo.checks.map((c) => [c.id, c]));
+  assert.deepEqual(Object.keys(by).sort(), ['off', 'tiny', 'tri'], 'a pool with no quote is not checked');
+  assert.ok(by.off.sets && Math.abs(by.off.gap) < 1e-9, 'the pool that set the price agrees with itself');
+  assert.ok(Math.abs(by.tri.gap - (1 / 0.96 - 1)) < 1e-9 && Math.abs(by.tiny.gap - 0.25) < 1e-9);
+  assert.deepEqual([gapFlag(by.off, 'USD'), gapFlag(by.tri, 'USD'), gapFlag(by.tiny, 'USD')], ['line', 'gap', 'thin']);
+  assert.equal(gapFlag({ gap: 0.012, depth: 1e6, fee: 0.01 }), 'line', 'inside twice the fee');
+  const gaps = priceGaps(t);
+  assert.deepEqual(gaps.map((g) => g.id), ['tri'], 'one entry per pool; thin pools and the price-setter are left out');
+  assert.equal(foo.checks[0].id, 'off', 'deepest first');
+});
+
+test('a redemption-rate token prices its neighbours only when no market route exists', () => {
+  // ampLUNA redeems for 2 LUNA but trades at 1.9. The dollar must be priced through the
+  // LUNA pool, not through the deeper ampLUNA pool at the redemption rate.
+  const AMP = 'key-AMP', USD = 'key-USD';
+  const pools = [
+    { id: 'amp-usd', type: 'concentrated', assets: [asset('AMP', 1e6, AMP), asset('USD', 1e5, USD)], quote: { from: AMP, to: USD, rate: 0.095 } },
+    { id: 'luna-usd', type: 'concentrated', assets: [asset('LUNA', 1e5), asset('USD', 5e3, USD)], quote: { from: 'uluna', to: USD, rate: 0.05 } },
+    { id: 'amp-only', type: 'xyk', assets: [asset('AMP', 10, AMP), asset('ZED', 40)] },
+  ];
+  const trace = {};
+  const prices = priceByKey(pools, { known: { [AMP]: 2 }, trace });
+  assert.equal(prices[USD], 20);
+  assert.deepEqual(trace[USD], { via: 'pool', id: 'luna-usd' });
+  assert.equal(prices['key-ZED'], 0.5, 'still used when it is the only route');
 });
