@@ -304,6 +304,8 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   function setSystems(list) {
     clearSystems();
     systems = list;
+    reach = list.reduce((far, s) => Math.max(far, s.r || 0), 0);
+    if (view.auto && !glide) view.dist = fitDist();
     group = new THREE.Group();
     lanes = new THREE.Group();
     lanes.visible = lanesOn;
@@ -421,11 +423,13 @@ export function createChart({ stage, canvas, tags, sectors, tokens, unknownColor
   // `ty` is the height of the point the camera looks at, on the chart's central axis.
   const HOME_Y = target.y;
   const view = { az: HOME.az, pol: HOME.pol, dist: 60, ty: HOME_Y, auto: true, tilted: false };
-  let W = 1, H = 1, dockBoxes = [];
+  let W = 1, H = 1, dockBoxes = [], reach = FIT_RADIUS;
   // 0 on a wide stage, 1 on a tall one, blending between aspect ratios 1.25 and 0.85.
   const tall = () => Math.min(1, Math.max(0, (1.25 - W / H) / 0.4));
   const fitDist = () => {
-    const radius = FIT_RADIUS + (FIT_RADIUS_TALL - FIT_RADIUS) * tall();
+    // Frame as far out as the furthest system drawn, so a short list fills the view.
+    const wide = Math.min(FIT_RADIUS, Math.max(PLATE_RADIUS + 4, reach + 4.5));
+    const radius = wide + (FIT_RADIUS_TALL - wide) * tall();
     return Math.min(150, Math.max(40, radius / (Math.tan(rad(19)) * (W / H))));
   };
   const homePol = () => HOME.pol + (TALL_POL - HOME.pol) * tall();

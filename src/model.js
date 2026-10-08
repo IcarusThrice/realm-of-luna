@@ -275,6 +275,25 @@ export function gaugeEmission({ alliances = [], annualProvisions = 0, connectors
   return out;
 }
 
+// The short list: which systems a first-time visitor sees. A system is on it when it is
+// starred in the curated list, when it is among the Alliance's `top` largest by staked
+// value or `top` highest by yield (ignoring stakes under `minStake`, where a tiny stake
+// makes a huge yield), or when it holds a pinned token. `pinned.alliance` keys count only
+// for Alliance systems; `pinned.anywhere` keys count wherever the pool is.
+export function featuredIds(systems, { top = 5, minStake = 0, pinned = {} } = {}) {
+  const ids = new Set(systems.filter((s) => s.star).map((s) => s.id));
+  const alliance = systems.filter((s) => !s.outer);
+  const take = (list, key) => list.sort((x, y) => y[key] - x[key]).slice(0, top).forEach((s) => ids.add(s.id));
+  take(alliance.filter((s) => s.staked > 0), 'staked');
+  take(alliance.filter((s) => s.yield > 0 && s.staked >= minStake), 'yield');
+  const inAlliance = pinned.alliance || [], anywhere = pinned.anywhere || [];
+  for (const s of systems) {
+    const keys = s.keys || [];
+    if (keys.some((k) => anywhere.includes(k)) || (!s.outer && keys.some((k) => inAlliance.includes(k)))) ids.add(s.id);
+  }
+  return ids;
+}
+
 function hash(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
@@ -302,6 +321,7 @@ export function mergeAlliance(gaugeAssets, curated, outer, sectors) {
       venue: g.venue,
       type: g.type || null,
       crown: !!(known && known.crown),
+      star: !!(known && known.star),
       pair: g.pair || null,
       asset: g.key,
       fleet: g.share,

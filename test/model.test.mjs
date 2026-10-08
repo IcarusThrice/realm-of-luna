@@ -405,3 +405,31 @@ test('a redemption-rate token prices its neighbours only when no market route ex
   assert.deepEqual(trace[USD], { via: 'pool', id: 'luna-usd' });
   assert.equal(prices['key-ZED'], 0.5, 'still used when it is the only route');
 });
+
+test('the short list is the starred, the largest, the best-yielding and the pinned', async () => {
+  const { featuredIds } = await import('../src/model.js');
+  const sys = (id, extra) => ({ id, outer: false, staked: null, yield: null, keys: null, ...extra });
+  const systems = [
+    sys('star', { star: true }),
+    sys('big1', { staked: 900, yield: 0.1 }), sys('big2', { staked: 800, yield: 0.2 }), sys('small', { staked: 50, yield: 0.3 }),
+    sys('dust', { staked: 1, yield: 90 }),               // a huge yield on a stake too small to count
+    sys('gold', { keys: ['uluna', 'key-GOLD'] }),         // pinned token in an Alliance pool
+    sys('plain', { staked: 10, yield: 0.01 }),
+    sys('ours', { outer: true, keys: ['key-OURS', 'key-USD'] }),
+    sys('gold-out', { outer: true, keys: ['key-GOLD', 'key-USD'] }), // pinned for the Alliance only
+    sys('out-big', { outer: true, staked: 5000, yield: 5 }),          // outside the Alliance: never a "top" pool
+  ];
+  const ids = featuredIds(systems, { top: 2, minStake: 20, pinned: { alliance: ['key-GOLD'], anywhere: ['key-OURS'] } });
+  assert.deepEqual([...ids].sort(), ['big1', 'big2', 'gold', 'ours', 'small', 'star']);
+  assert.deepEqual([...featuredIds(systems)].sort(), ['big1', 'big2', 'dust', 'plain', 'small', 'star'], 'defaults: top five of each, no pins');
+});
+
+test('the curated short list names real systems, and pins resolve to token keys', async () => {
+  const { STARS, PINNED } = await import('../src/realm.js');
+  const { keysForSymbol } = await import('../src/logos.js');
+  const ids = new Set(POOLS.map((p) => p.id));
+  for (const id of STARS) assert.ok(ids.has(id), `${id} is in the curated list`);
+  assert.equal(POOLS.filter((p) => p.star).length, STARS.length);
+  for (const sym of [...PINNED.alliance, ...PINNED.anywhere]) assert.ok(keysForSymbol(sym).length > 0, `${sym} has a key`);
+  assert.deepEqual(keysForSymbol('USDC.inj'), [USDC_INJ]);
+});

@@ -1,16 +1,22 @@
 // Page glue: curated pools + live reserves -> chart, list and reading panel.
 import { ERIS_LIQUIDITY_HUB, ERIS_CONNECTORS, PEGS, USDC_INJ } from './config.js';
-import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER } from './realm.js';
+import { TOKENS, UNKNOWN_TOKEN, SECTORS, POOLS, ALLIANCE, OUTER, PINNED } from './realm.js';
 import { loadLive, loadAlliance, loadStaked, loadTribute, loadEscrow, loadEmission, loadTokenFacts, loadQuotes, loadMarket, lunaUsd, knownRates } from './chain.js';
-import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, tokenIndex, gapFlag, priceGaps, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
+import { buildSystems, mergeAlliance, stakesFor, gaugeEmission, tokenIndex, gapFlag, priceGaps, featuredIds, layout, nextCycle, formatCountdown, formatAmount, formatMass, pairName } from './model.js';
 import { createChart } from './scene.js';
-import { logosFor, logoFor } from './logos.js';
+import { logosFor, logoFor, keysForSymbol } from './logos.js';
 import { tokenKind, tokenAbout, marketId, MARKET_IDS } from './tokens.js';
 
 const $ = (id) => document.getElementById(id);
 const POOL_TYPES = { xyk: 'constant-product pool', concentrated: 'concentrated pool', stable: 'stable pool' };
 
-let systems = [];
+let everything = [];      // every system the chart knows, with its data
+let systems = [];         // the ones drawn: the short list, or all of them
+let showAll = false;      // the visitor's choice, remembered between visits
+const revealed = new Set(); // systems opened from a link while the short list is showing
+const VIEW_KEY = 'realm-of-luna:view';
+try { showAll = localStorage.getItem(VIEW_KEY) === 'all'; } catch (err) { /* storage unavailable */ }
+const PIN_KEYS = { alliance: PINNED.alliance.flatMap(keysForSymbol), anywhere: PINNED.anywhere.flatMap(keysForSymbol) };
 let selected = POOLS[0].id;
 let listEls = {};
 let period = null;
@@ -191,6 +197,13 @@ function hideToken() {
 }
 
 function select(id) {
+  // A system that exists but is not on the short list is added to the chart when asked for.
+  if (!systems.some((x) => x.id === id) && everything.some((x) => x.id === id)) {
+    revealed.add(id);
+    selected = id;
+    draw();
+    return;
+  }
   const s = systems.find((x) => x.id === id) || systems[0];
   if (!s) return;
   selected = s.id;
@@ -256,10 +269,27 @@ function select(id) {
   if (chart) chart.setSelected(s.id);
 }
 
+// New data: keep all of it, then draw.
 function render(next) {
-  systems = layout(next, SECTORS);
-  tokens = tokenIndex(systems);
+  everything = next;
+  tokens = tokenIndex(everything);
+  draw();
+}
+
+// Draw the short list or everything, from the data already in hand.
+function draw() {
+  const unit0 = (everything.find((s) => s.live) || {}).unit;
+  const short = featuredIds(everything, { top: 5, minStake: unit0 === 'USD' ? 2000 : 40000, pinned: PIN_KEYS });
+  const shown = showAll ? everything : everything.filter((s) => short.has(s.id) || revealed.has(s.id));
+  systems = layout(shown, SECTORS);
+  if (!systems.some((s) => s.id === selected) && systems.length) selected = (systems.find((s) => !s.outer) || systems[0]).id;
   const keep = shownToken;
+  const hidden = everything.length - systems.length;
+  $('everything').checked = showAll;
+  $('everything-label').textContent = `All ${everything.length} systems`;
+  $('list-title').textContent = showAll ? 'All systems' : 'Featured systems';
+  $('list-sum').textContent = showAll ? `Every system on the chart. Untick "All ${everything.length} systems" on the chart for the short list.`
+    : `${systems.length} of ${everything.length}: the Alliance's largest and highest-yielding pools, its gold and ROAR pools, xASTRO, and DEEPSTATE, the token of the team behind this chart.`;
 
   // The list mirrors the chart: one group per gauge, then everything outside the Alliance.
   const list = $('list');
@@ -287,21 +317,29 @@ function render(next) {
     }
     list.appendChild(row);
   }
+  if (hidden > 0) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'back';
+    more.textContent = `Show all ${everything.length} systems`;
+    more.addEventListener('click', () => setShowAll(true));
+    list.appendChild(more);
+  }
   if (chart) chart.setSystems(systems);
   select(selected);
   if (keep && (tokens[keep] || keep === 'uluna')) showToken(keep); // stay on the token through a data refresh
 
   const sum = (xs) => xs.reduce((t, s) => t + s.value, 0);
-  const inside = systems.filter((s) => s.live && !s.outer);
-  const outside = systems.filter((s) => s.live && s.outer);
+  const inside = everything.filter((s) => s.live && !s.outer);
+  const outside = everything.filter((s) => s.live && s.outer);
   const unit = (inside[0] || outside[0] || {}).unit;
   $('r-mass').textContent = inside.length ? formatMass(sum(inside), unit) : 'Not read yet';
   $('r-outer').textContent = outside.length ? formatMass(sum(outside), unit) : 'Not read yet';
   const settled = inside.filter((s) => s.staked != null);
   $('r-settled').textContent = settled.length ? formatMass(settled.reduce((t, s) => t + s.staked, 0), unit) : 'Not read yet';
-  const paying = systems.filter((s) => s.tribute);
+  const paying = everything.filter((s) => s.tribute);
   $('r-tribute').textContent = paying.length ? formatMass(paying.reduce((t, s) => t + s.tribute.value, 0), paying[0].unit) : 'Not read yet';
-  $('r-data').textContent = `${inside.length + outside.length} of ${systems.length} live`;
+  $('r-data').textContent = `${inside.length + outside.length} of ${everything.length} live`;
 
   // Price gaps across the whole chart, so nobody has to open every planet to find one.
   const gaps = priceGaps(tokens);
@@ -325,6 +363,13 @@ function tick() {
 }
 
 for (const a of document.querySelectorAll('[data-eris]')) a.href = ERIS_LIQUIDITY_HUB;
+function setShowAll(on) {
+  showAll = on;
+  if (!on) revealed.clear();
+  try { localStorage.setItem(VIEW_KEY, on ? 'all' : 'short'); } catch (err) { /* storage unavailable */ }
+  draw();
+}
+$('everything').addEventListener('change', (e) => setShowAll(e.target.checked));
 $('t-back').addEventListener('click', hideToken);
 $('t-copy').addEventListener('click', async () => {
   const label = $('t-copy').textContent;

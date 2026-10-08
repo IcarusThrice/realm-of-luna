@@ -77,4 +77,15 @@ export const OUTER = [
   { id: 'out-atom-statom', a: 'ATOM', b: 'stATOM', sector: null, kind: 'pair', venue: 'Astroport', type: 'concentrated', crown: false, outer: true, pair: 'terra1f9vmtntpjmkyhkxtlc49jcq6cv8rfz0kr06zv6efdtdgae4m9y9qlzm36t' },
 ];
 
+// The short list: what a first-time visitor sees before choosing to see everything.
+// STARS are shown from the first moment, before any data arrives: the pools the Alliance
+// itself promotes (Phoenix's weekly "top APRs" post), the gold pools, ROAR, and DEEPSTATE.
+// Once data is in, the chart adds the Alliance's largest and highest-yielding pools by
+// itself, so the list keeps up from week to week (see featuredIds in model.js).
+// PINNED names tokens whose pools are always on the short list: `alliance` tokens only
+// when the pool is in the Alliance, `anywhere` tokens wherever the pool is.
+export const STARS = ['luna-solid', 'luna-fuel', 'luna-astro', 'luna-eure', 'luna-usdt', 'luna-roar', 'luna-paxg', 'paxg-wbtc-atom', 'xastro', 'out-deepstate-usdc-inj'];
+export const PINNED = { alliance: ['PAXG', 'ROAR', 'xASTRO'], anywhere: ['DEEPSTATE'] };
+for (const p of [...ALLIANCE, ...OUTER]) p.star = STARS.includes(p.id);
+
 export const POOLS = [...ALLIANCE, ...OUTER];

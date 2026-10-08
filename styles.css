@@ -167,3 +167,11 @@ button, a { font: inherit; color: inherit; }
 .check small { grid-column: 1 / -1; font-family: var(--body); font-size: 12px; color: var(--dim); }
 .check.flag .gap { color: #f0a35a; }
 .check.flag small { color: #f0a35a; }
+
+/* A section that starts closed, so the panel is not a wall of text on first sight. */
+.fold summary { cursor: pointer; font-family: var(--display); font-size: 21px; color: var(--brass); list-style: none; display: flex; align-items: center; gap: 10px; }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::after { content: "+"; font-family: var(--data); font-size: 16px; color: var(--dim); }
+.fold[open] summary::after { content: "\2212"; }
+.fold[open] summary { margin-bottom: 10px; }
+.dock.tl { flex-wrap: wrap; }

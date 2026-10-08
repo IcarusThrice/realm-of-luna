@@ -37,6 +37,14 @@ const SYMBOL_BY_KEY = {
 // The symbol this project gives a contract or factory token, or undefined.
 export const symbolForKey = (key) => SYMBOL_BY_KEY[key];
 
+// Every key this project knows under a symbol (a symbol can cover several bridged forms).
+export function keysForSymbol(symbol) {
+  return [
+    ...Object.keys(KNOWN_ASSETS).filter((k) => KNOWN_ASSETS[k].symbol === symbol),
+    ...Object.keys(SYMBOL_BY_KEY).filter((k) => SYMBOL_BY_KEY[k] === symbol),
+  ];
+}
+
 // The logo for one token, or null.
 // A token read from the chain is matched by its key alone: anyone can mint a token and
 // call it "LUNA", so a symbol from the chain proves nothing. The symbol is used only when

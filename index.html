@@ -35,6 +35,7 @@
       <div class="nogl" id="nogl" hidden>The 3D chart needs WebGL, which this browser has turned off. Every system is still listed in the panel.</div>
       <div class="dock tl">
         <label for="lanes"><input type="checkbox" id="lanes" checked> Trade lanes</label>
+        <label for="everything"><input type="checkbox" id="everything"> <span id="everything-label">All systems</span></label>
       </div>
       <div class="dock bl">Drag to turn the chart. Scroll or pinch to zoom. Double-click a system to frame it, or the Moon to step back.</div>
       <div class="dock br">
@@ -107,12 +108,13 @@
       </div>
 
       <div>
-        <h3>All systems</h3>
+        <h3 id="list-title">Systems</h3>
+        <p class="about" id="list-sum"></p>
         <div class="list" id="list"></div>
       </div>
 
-      <div>
-        <h3>Reading the chart</h3>
+      <details class="fold">
+        <summary>Reading the chart</summary>
         <dl class="key">
           <dt>Sector</dt><dd>One of the four reward gauges: Stable, Project, Bluechip, Single</dd>
           <dt>Price gap</dt><dd>Two pools disagreeing on a token's price by more than their fees. It can be a real mispricing or an error, and it is not a promise of profit: fees, slippage and thin pools can swallow it</dd>
@@ -129,7 +131,7 @@
           <dt>Houses</dt><dd>Holders who lock LUNA to vote</dd>
           <dt>Cycle</dt><dd>One weekly epoch of votes and rewards</dd>
         </dl>
-      </div>
+      </details>
     </aside>
   </div>
 </div>
